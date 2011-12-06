@@ -39,9 +39,11 @@ import Network.Socket
     , Socket, sClose, shutdown, ShutdownCmd(..), HostName, ServiceName, socket, connect
     )
 import Network.BSD ( getProtocolNumber )
+import Network.URI
 import Network.Wai
 import qualified Network.Socket
 import qualified Network.Socket.ByteString as Sock
+import Control.Applicative
 import Control.Exception
     ( bracket, finally, Exception, SomeException, catch
     , fromException, AsyncException (ThreadKilled)
@@ -49,7 +51,8 @@ import Control.Exception
     )
 import Control.Concurrent (forkIO, ThreadId, killThread)
 import qualified Data.Char as C
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
+import qualified Network.HTTP.Enumerator as HE
 
 import Data.Typeable (Typeable)
 
@@ -61,7 +64,7 @@ import Blaze.ByteString.Builder.Enumerator (builderToByteString)
 import Blaze.ByteString.Builder.HTTP
     (chunkedTransferEncoding, chunkedTransferTerminator)
 import Blaze.ByteString.Builder
-    (copyByteString, Builder, toLazyByteString, toByteStringIO, toByteString)
+    (copyByteString, Builder, toLazyByteString, toByteStringIO, toByteString, fromByteString)
 import Blaze.ByteString.Builder.Char8 (fromChar, fromShow)
 import Data.Monoid (mappend, mconcat)
 
@@ -152,11 +155,12 @@ runSettingsSocket set socket = do
     let onE = settingsOnException set
         port = settingsPort set
     tm <- T.initialize $ settingsTimeout set * 1000000
+    mgr <- HE.newManager
     forever $ do
         (conn, sa) <- accept socket
         _ <- forkIO $ do
             th <- T.register tm (return()) -- T.registerKillThread tm
-            serveConnection th tm onE port conn sa
+            serveConnection th tm onE port conn sa mgr
             T.cancel th
         return ()
 
@@ -174,8 +178,10 @@ shutdownX s ShutdownSend = do
 serveConnection :: T.Handle
                 -> T.Manager
                 -> (SomeException -> IO ())
-                -> Port -> Socket -> SockAddr -> IO ()
-serveConnection th tm onException port conn remoteHost' = do
+                -> Port -> Socket -> SockAddr
+                -> HE.Manager
+                -> IO ()
+serveConnection th tm onException port conn remoteHost' mgr = do
       mExtraSocket <- E.run_ (fromClient $$ serveConnection')
           `finally` sCloseX conn
       case mExtraSocket of
@@ -186,16 +192,18 @@ serveConnection th tm onException port conn remoteHost' = do
     `catch` onException
   where
     fromClient = enumSocket th bytesPerRead conn
-    mkHeaders req s hrs = E.enumList 1 [toByteString $ headers (httpVersion req) s hrs False]
+    mkHeaders ver s hrs = E.enumList 1 [toByteString $ headers ver s hrs False]
 
     serveConnection' :: E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
     serveConnection' = do
         req <- parseRequest port remoteHost'
-        liftIO $ print $ requestHeaders req
+        --liftIO $ print $ requestHeaders req
         case req of
+            _ | requestMethod req == "GET" || requestMethod req == "POST" ->
+                proxyPlain req
             _ | requestMethod req == "CONNECT" ->
                 case B.split ':' (rawPathInfo req) of
-                    [h, p] -> proxy h (read $ B.unpack p) req
+                    [h, p] -> proxyConnect h (read $ B.unpack p) req
                     _	-> failRequest req "Bad request" ("Bad request '" `mappend` rawPathInfo req `mappend` "'.")
             _ | otherwise ->
                 failRequest req "Unknown request" ("Unknown request '" `mappend` rawPathInfo req `mappend` "'.")
@@ -204,20 +212,66 @@ serveConnection th tm onException port conn remoteHost' = do
     failRequest req headerMsg bodyMsg = do
         EB.isolate 0 =$
             E.enumList 1 [bodyMsg] $$
-            mkHeaders req status [("Content-Length", B.pack . show . B.length $ bodyMsg)] $$
-            iterSocket th conn
+            mkHeaders (httpVersion req) status [("Content-Length", B.pack . show . B.length $ bodyMsg)] $$
+            iterSocket th conn True
         return Nothing
       where
         status = H.status500 {
                 H.statusMessage = headerMsg
             }
 
-    proxy :: ByteString -> Int -> Request -> E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
-    proxy host port req = do
+    proxyPlain :: Request -> E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
+    proxyPlain req = do
+        let urlStr = "http://" `mappend` serverName req
+                               `mappend` rawPathInfo req
+                               `mappend` H.renderQuery True (queryString req)
+            close =
+                let hasClose hdrs = (== "close") . CI.mk <$> lookup "connection" hdrs
+                    mClose = hasClose (requestHeaders req)
+                    -- RFC2616: Connection defaults to Close in HTTP/1.0 and Keep-Alive in HTTP/1.1
+                    defaultClose = if httpVersion req == H.HttpVersion 1 0
+                                       then True
+                                       else False
+                in  fromMaybe defaultClose mClose
+            outHdrs = [(n,v) | (n,v) <- requestHeaders req, n `notElem` [
+                          "Host", "Content-Length"
+                      ]]
+        liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ (B.unpack urlStr)
+        let contentLength = if requestMethod req == "GET"
+                                then 0
+                                else read . B.unpack . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
+        postBody <- mconcat . L.toChunks <$> EB.take contentLength
+                                       -- This loads it all into memory at once.
+                                       -- TO DO: Stream via iteratee
+        let enumPostBody = E.enumList 1 [fromByteString postBody]
+        url <-
+            (\url -> url { HE.method = requestMethod req,
+                           HE.requestHeaders = outHdrs,
+                           HE.rawBody = True,
+                           HE.requestBody = HE.RequestBodyEnum (fromIntegral contentLength) enumPostBody })
+            <$> liftIO (HE.parseUrl (B.unpack urlStr))
+        close' <- HE.http url (handleHttpReply close) mgr
+        if close'
+            then return Nothing
+            else serveConnection'
+      where
+        handleHttpReply close status hdrs = do
+            let remoteClose = True -- isNothing ("content-length" `lookup` hdrs)
+                close' = close || remoteClose
+                hdrs' = [(n, v) | (n, v) <- hdrs, n `notElem`
+                             ["connection", "proxy-connection"]
+                        ]
+                          ++ [("Connection", if close' then "Close" else "Keep-Alive")]
+            mkHeaders (httpVersion req) status hdrs' $$ iterSocket th conn close
+            return remoteClose
+
+    proxyConnect :: ByteString -> Int -> Request -> E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
+    proxyConnect host port req = do
+        liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ (B.unpack host)++":"++show port
         mHandles <- liftIO $ do
             s <- connectTo (B.unpack host) (PortNumber . fromIntegral $ port)
             let eh = enumSocket th 65536 s
-                ih = iterSocket th s
+                ih = iterSocket th s True
             return $ Right (s, eh, ih)
           `catch` \(exc :: IOException) -> do
             return $ Left $ "Unable to connect: " `mappend` B.pack (show exc)
@@ -225,7 +279,7 @@ serveConnection th tm onException port conn remoteHost' = do
             Right (s, eh, ih) -> do
                 tid <- liftIO $ forkIO $ do
                     wrTh <- T.register tm (return()) -- T.registerKillThread tm
-                    (E.run_ $ eh $$ mkHeaders req H.statusOK [] $$ iterSocket wrTh conn)
+                    (E.run_ $ eh $$ mkHeaders (httpVersion req) H.statusOK [] $$ iterSocket wrTh conn True)
                         `catch` onException
                     T.cancel wrTh
                 ih
@@ -302,8 +356,9 @@ parseRequest' port (firstLine:otherLines) remoteHost' = do
                          then S.breakByte 47 $ S.drop 7 rpath' -- '/'
                          else ("", rpath')
     let heads = map parseHeaderNoAttr otherLines
-    let host = fromMaybe host' $ lookup "host" heads
-    let serverName' = takeUntil 58 host -- ':'
+    let host = case (host', lookup "host" heads) of
+            ("", Just h) -> h
+            (h, _)       -> h
     return $ Request
                 { requestMethod = method
                 , httpVersion = httpversion
@@ -311,7 +366,12 @@ parseRequest' port (firstLine:otherLines) remoteHost' = do
                 , rawPathInfo = rpath
                 , rawQueryString = gets
                 , queryString = H.parseQuery gets
-                , serverName = serverName'
+                -- NOTE! The meaning of serverName is different from what it is in standard
+                -- WAI, in the following way:
+                -- 1. Here it includes the port number. Otherwise there is no way to obtain it.
+                -- 2. Where 'Host:' is also supplied, we prefer the URI host, since it has the.
+                --    (WAI gives preference to the 'Host:' header.)
+                , serverName = host  -- serverName'
                 , serverPort = port
                 , requestHeaders = heads
                 , isSecure = False
@@ -427,8 +487,9 @@ enumSocket th len socket =
 
 iterSocket :: T.Handle
            -> Socket
+           -> Bool  -- ^ To close
            -> E.Iteratee B.ByteString IO ()
-iterSocket th sock =
+iterSocket th sock toClose =
     E.continue step
   where
     -- We pause timeouts before passing control back to user code. This ensures
@@ -437,10 +498,11 @@ iterSocket th sock =
     -- so that we can kill idle connections.
     step E.EOF = do
         liftIO $ T.resume th
-        liftIO $ do
-            shutdownX sock ShutdownSend
-          `catch` \(exc :: IOException) ->
-            putStrLn $ "couldn't shutdown send side of "++show sock++": "++show exc
+        when toClose $ do
+            liftIO $ do
+                shutdownX sock ShutdownSend
+              `catch` \(exc :: IOException) ->
+                putStrLn $ "couldn't shutdown send side of "++show sock++": "++show exc
         E.yield () E.EOF
     step (E.Chunks []) = E.continue step
     step (E.Chunks xs) = do
