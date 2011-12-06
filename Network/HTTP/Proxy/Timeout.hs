@@ -1,4 +1,14 @@
-module Timeout
+---------------------------------------------------------
+-- Copyright     : Michael Snoyman
+-- License       : BSD3
+--
+-- History:
+--   This code originated in Michael Snoyman's Warp package. The only changes
+--   are this file header and the module name.
+--
+---------------------------------------------------------
+
+module Network.HTTP.Proxy.Timeout
     ( Manager
     , Handle
     , initialize

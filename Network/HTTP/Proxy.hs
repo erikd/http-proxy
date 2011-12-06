@@ -1,26 +1,30 @@
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 ---------------------------------------------------------
 --
--- HTTP Proxy with a lot of code taken from Michael Snoyman's Warp, modified by
--- Stephen Blackheath.
---
--- Copyright     : Michael Snoyman
+-- Copyright     : Michael Snoyman, Stephen Blackheath, Erik de Castro Lopo
+-- Maintainer    : Erik de Castro Lopo <erikd@mega-nerd.com>
 -- License       : BSD3
 --
--- Dependencies:
---   case-insensitive
---   http-enumerator
---   unix-compat
---   wai
+-- History:
+--   This code originated in Michael Snoyman's Warp package, was modified by
+--   Stephen Blackheath to turn it into a HTTP/HTTP proxy and is now maintained
+--   by Erik de Castro Lopo.
 --
 ---------------------------------------------------------
 
-module Main where
+module Network.HTTP.Proxy
+	( run
+	, runSettings
+	, runSettingsSocket
+
+	, Settings (..)
+	, defaultSettings
+	)
+where
 
 import Prelude hiding (catch, lines)
 
@@ -29,8 +33,7 @@ import qualified Data.ByteString as S
 import qualified Data.ByteString.Unsafe as SU
 import qualified Data.ByteString.Char8 as B
 import qualified Data.ByteString.Lazy as L
-import Network
-    ( PortID(..) )
+import Network    ( PortID(..) )
 import Network.Socket
     ( accept, Family (..)
     , SocketType (Stream), listen, bindSocket, setSocketOption, maxListenQueue
@@ -39,7 +42,6 @@ import Network.Socket
     , Socket, sClose, shutdown, ShutdownCmd(..), HostName, ServiceName, socket, connect
     )
 import Network.BSD ( getProtocolNumber )
-import Network.URI
 import Network.Wai
 import qualified Network.Socket
 import qualified Network.Socket.ByteString as Sock
@@ -50,7 +52,7 @@ import Control.Exception
     , bracketOnError, IOException, throw
     )
 import Control.Concurrent (forkIO, ThreadId, killThread)
-import qualified Data.Char as C
+
 import Data.Maybe (fromMaybe, isNothing)
 import qualified Network.HTTP.Enumerator as HE
 
@@ -60,26 +62,19 @@ import Data.Enumerator (($$), (=$), (>>==))
 import qualified Data.Enumerator as E
 import qualified Data.Enumerator.List as EL
 import qualified Data.Enumerator.Binary as EB
-import Blaze.ByteString.Builder.Enumerator (builderToByteString)
-import Blaze.ByteString.Builder.HTTP
-    (chunkedTransferEncoding, chunkedTransferTerminator)
+
 import Blaze.ByteString.Builder
-    (copyByteString, Builder, toLazyByteString, toByteStringIO, toByteString, fromByteString)
+    (copyByteString, Builder, toByteString, fromByteString)
 import Blaze.ByteString.Builder.Char8 (fromChar, fromShow)
 import Data.Monoid (mappend, mconcat)
 
-import qualified System.PosixCompat.Files as P
-
 import Control.Monad.IO.Class (liftIO)
-import qualified Timeout as T
-import Timeout (Manager, registerKillThread, pause, resume)
-import Data.Word (Word8)
+import qualified Network.HTTP.Proxy.Timeout as T
 import Data.List (foldl')
 import Control.Monad (forever, when)
 import qualified Network.HTTP.Types as H
 import qualified Data.CaseInsensitive as CI
-import System.IO (hPutStrLn, stderr, hSetBuffering, BufferMode(NoBuffering))
-import Data.Version (showVersion)
+import System.IO (hPutStrLn, stderr)
 
 import Data.List (delete)
 
@@ -113,8 +108,6 @@ bindPort p s = do
             listen sock maxListenQueue
             return sock
         )
-
-main = run 31081
 
 -- | Run an 'Application' on the given port. This calls 'runSettings' with
 -- 'defaultSettings'.
@@ -151,29 +144,48 @@ type Port = Int
 -- Note that the 'settingsPort' will still be passed to 'Application's via the
 -- 'serverPort' record.
 runSettingsSocket :: Settings -> Socket -> IO ()
-runSettingsSocket set socket = do
+runSettingsSocket set sock = do
     let onE = settingsOnException set
         port = settingsPort set
     tm <- T.initialize $ settingsTimeout set * 1000000
     mgr <- HE.newManager
     forever $ do
-        (conn, sa) <- accept socket
+        (conn, sa) <- accept sock
         _ <- forkIO $ do
-            th <- T.register tm (return()) -- T.registerKillThread tm
+            th <- T.registerKillThread tm
             serveConnection th tm onE port conn sa mgr
             T.cancel th
         return ()
 
+verboseSockets :: Bool
 verboseSockets = False
+
+sCloseX :: Socket -> IO ()
 sCloseX s = do
-    when verboseSockets $ putStrLn ("close "++show s)
+    when verboseSockets $ putStrLn ("close " ++ show s)
     sClose s
+
+shutdownX :: Socket -> ShutdownCmd -> IO ()
 shutdownX s ShutdownReceive = do
-    when verboseSockets $ putStrLn ("shutdown "++show s++" ShutdownReceive")
+    when verboseSockets $ putStrLn ("shutdown " ++ show s++" ShutdownReceive")
     shutdown s ShutdownReceive
+
 shutdownX s ShutdownSend = do
-    when verboseSockets $ putStrLn ("shutdown "++show s++" ShutdownSend")
+    when verboseSockets $ putStrLn ("shutdown " ++ show s++" ShutdownSend")
     shutdown s ShutdownSend
+
+shutdownX s ShutdownBoth = do
+    when verboseSockets $ putStrLn ("shutdown " ++ show s++" ShutdownBoth")
+    shutdown s ShutdownBoth
+
+mkHeaders :: Monad m
+          => H.HttpVersion
+          -> H.Status
+          -> H.ResponseHeaders
+          -> E.Enumerator ByteString m b
+mkHeaders ver s hrs =
+    E.enumList 1 [toByteString $ headers ver s hrs False]
+
 
 serveConnection :: T.Handle
                 -> T.Manager
@@ -192,7 +204,6 @@ serveConnection th tm onException port conn remoteHost' mgr = do
     `catch` onException
   where
     fromClient = enumSocket th bytesPerRead conn
-    mkHeaders ver s hrs = E.enumList 1 [toByteString $ headers ver s hrs False]
 
     serveConnection' :: E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
     serveConnection' = do
@@ -203,22 +214,10 @@ serveConnection th tm onException port conn remoteHost' mgr = do
                 proxyPlain req
             _ | requestMethod req == "CONNECT" ->
                 case B.split ':' (rawPathInfo req) of
-                    [h, p] -> proxyConnect h (read $ B.unpack p) req
-                    _	-> failRequest req "Bad request" ("Bad request '" `mappend` rawPathInfo req `mappend` "'.")
+                    [h, p] -> proxyConnect th tm onException conn h (read $ B.unpack p) req
+                    _	-> failRequest th conn req "Bad request" ("Bad request '" `mappend` rawPathInfo req `mappend` "'.")
             _ | otherwise ->
-                failRequest req "Unknown request" ("Unknown request '" `mappend` rawPathInfo req `mappend` "'.")
-
-    failRequest :: Request -> ByteString -> ByteString -> E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
-    failRequest req headerMsg bodyMsg = do
-        EB.isolate 0 =$
-            E.enumList 1 [bodyMsg] $$
-            mkHeaders (httpVersion req) status [("Content-Length", B.pack . show . B.length $ bodyMsg)] $$
-            iterSocket th conn True
-        return Nothing
-      where
-        status = H.status500 {
-                H.statusMessage = headerMsg
-            }
+                failRequest th conn req "Unknown request" ("Unknown request '" `mappend` rawPathInfo req `mappend` "'.")
 
     proxyPlain :: Request -> E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
     proxyPlain req = do
@@ -256,7 +255,7 @@ serveConnection th tm onException port conn remoteHost' mgr = do
             else serveConnection'
       where
         handleHttpReply close status hdrs = do
-            let remoteClose = True -- isNothing ("content-length" `lookup` hdrs)
+            let remoteClose = isNothing ("content-length" `lookup` hdrs)
                 close' = close || remoteClose
                 hdrs' = [(n, v) | (n, v) <- hdrs, n `notElem`
                              ["connection", "proxy-connection"]
@@ -265,11 +264,21 @@ serveConnection th tm onException port conn remoteHost' mgr = do
             mkHeaders (httpVersion req) status hdrs' $$ iterSocket th conn close
             return remoteClose
 
-    proxyConnect :: ByteString -> Int -> Request -> E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
-    proxyConnect host port req = do
-        liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ (B.unpack host)++":"++show port
+failRequest :: T.Handle -> Socket -> Request -> ByteString -> ByteString -> E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
+failRequest th conn req headerMsg bodyMsg = do
+        EB.isolate 0 =$
+            E.enumList 1 [bodyMsg] $$
+            mkHeaders (httpVersion req) status [("Content-Length", B.pack . show . B.length $ bodyMsg)] $$
+            iterSocket th conn True
+        return Nothing
+      where
+        status = H.status500 { H.statusMessage = headerMsg }
+
+proxyConnect :: T.Handle -> T.Manager -> (SomeException -> IO ()) -> Socket -> ByteString -> Int -> Request -> E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
+proxyConnect th tm onException conn host prt req = do
+        liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ (B.unpack host)++":" ++ show prt
         mHandles <- liftIO $ do
-            s <- connectTo (B.unpack host) (PortNumber . fromIntegral $ port)
+            s <- connectTo (B.unpack host) (PortNumber . fromIntegral $ prt)
             let eh = enumSocket th 65536 s
                 ih = iterSocket th s True
             return $ Right (s, eh, ih)
@@ -278,20 +287,21 @@ serveConnection th tm onException port conn remoteHost' mgr = do
         case mHandles of
             Right (s, eh, ih) -> do
                 tid <- liftIO $ forkIO $ do
-                    wrTh <- T.register tm (return()) -- T.registerKillThread tm
+                    wrTh <- T.registerKillThread tm
                     (E.run_ $ eh $$ mkHeaders (httpVersion req) H.statusOK [] $$ iterSocket wrTh conn True)
                         `catch` onException
                     T.cancel wrTh
                 ih
                 return (Just (tid, s))
             Left errorMsg ->
-                failRequest req errorMsg ("PROXY FAILURE\r\n" `mappend` errorMsg)
+                failRequest th conn req errorMsg ("PROXY FAILURE\r\n" `mappend` errorMsg)
 
 connectTo :: HostName		-- Hostname
 	  -> PortID 		-- Port Identifier
 	  -> IO Socket		-- Connected Socket
 connectTo hostname (Service serv) = connect' hostname serv
 connectTo hostname (PortNumber port) = connect' hostname (show port)
+connectTo _ (UnixSocket _) = error "Cannot connect to a UnixSocket"
 
 connect' :: HostName -> ServiceName -> IO Socket
 connect' host serv = do
@@ -378,13 +388,6 @@ parseRequest' port (firstLine:otherLines) remoteHost' = do
                 , remoteHost = remoteHost'
                 }
 
-takeUntil :: Word8 -> ByteString -> ByteString
-takeUntil c bs =
-    case S.elemIndex c bs of
-       Just !idx -> SU.unsafeTake idx bs
-       Nothing -> bs
-{-# INLINE takeUntil #-}
-
 parseFirst :: ByteString
            -> E.Iteratee S.ByteString IO (ByteString, ByteString, ByteString, H.HttpVersion)
 parseFirst s =
@@ -430,31 +433,10 @@ headers !httpversion !status !responseHeaders !isChunked' = {-# SCC "headers" #-
 
 responseHeaderToBuilder :: Builder -> H.Header -> Builder
 responseHeaderToBuilder b (x, y) = b
-  `mappend` copyByteString (CI.original x)
-  `mappend` colonSpaceBuilder
-  `mappend` copyByteString y
-  `mappend` newlineBuilder
-
-checkPersist :: Request -> Bool
-checkPersist req
-    | ver == H.http11 = checkPersist11 conn
-    | otherwise       = checkPersist10 conn
-  where
-    ver = httpVersion req
-    conn = lookup "connection" $ requestHeaders req
-    checkPersist11 (Just x)
-        | CI.foldCase x == "close"      = False
-    checkPersist11 _                    = True
-    checkPersist10 (Just x)
-        | CI.foldCase x == "keep-alive" = True
-    checkPersist10 _                    = False
-
-isChunked :: H.HttpVersion -> Bool
-isChunked = (==) H.http11
-
-hasBody :: H.Status -> Request -> Bool
-hasBody s req = s /= (H.Status 204 "") && s /= H.status304 &&
-                H.statusCode s >= 200 && requestMethod req /= "HEAD"
+    `mappend` copyByteString (CI.original x)
+    `mappend` colonSpaceBuilder
+    `mappend` copyByteString y
+    `mappend` newlineBuilder
 
 parseHeaderNoAttr :: ByteString -> H.Header
 parseHeaderNoAttr s =
@@ -467,18 +449,18 @@ parseHeaderNoAttr s =
      in (CI.mk k, rest')
 
 enumSocket :: T.Handle -> Int -> Socket -> E.Enumerator ByteString IO a
-enumSocket th len socket =
+enumSocket th len sock =
     inner
   where
     inner (E.Continue k) = do
-        bs <- liftIO $ Sock.recv socket len
+        bs <- liftIO $ Sock.recv sock len
         liftIO $ T.tickle th
         if S.null bs
             then do
                 liftIO $ do
-                    shutdownX socket ShutdownReceive
+                    shutdownX sock ShutdownReceive
                   `catch` \(exc :: IOException) ->
-                    putStrLn $ "couldn't shutdown read side of "++show socket++": "++show exc
+                    putStrLn $ "couldn't shutdown read side of " ++ show sock++": " ++ show exc
                 E.continue k
             else k (E.Chunks [bs]) >>== inner
     inner step = E.returnI step
@@ -502,7 +484,7 @@ iterSocket th sock toClose =
             liftIO $ do
                 shutdownX sock ShutdownSend
               `catch` \(exc :: IOException) ->
-                putStrLn $ "couldn't shutdown send side of "++show sock++": "++show exc
+                putStrLn $ "couldn't shutdown send side of " ++ show sock++": " ++ show exc
         E.yield () E.EOF
     step (E.Chunks []) = E.continue step
     step (E.Chunks xs) = do
@@ -613,20 +595,6 @@ checkCR bs pos =
         then p
         else pos
 {-# INLINE checkCR #-}
-
--- Note: This function produces garbage on invalid input. But serving an
--- invalid content-length is a bad idea, mkay?
-readInt :: S.ByteString -> Integer
-readInt = S.foldl' (\x w -> x * 10 + fromIntegral w - 48) 0
-
--- | Call the inner function with a timeout manager.
-withManager :: Int -- ^ timeout in microseconds
-            -> (Manager -> IO a)
-            -> IO a
-withManager timeout f = do
-    -- FIXME when stopManager is available, use it
-    man <- T.initialize timeout
-    f man
 
 serverHeader :: H.RequestHeaders -> H.RequestHeaders
 serverHeader hdrs = case lookup key hdrs of
