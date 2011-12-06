@@ -249,7 +249,7 @@ serveConnection th tm onException port conn remoteHost' mgr = do
                            HE.rawBody = True,
                            HE.requestBody = HE.RequestBodyEnum (fromIntegral contentLength) enumPostBody })
             <$> liftIO (HE.parseUrl (B.unpack urlStr))
-        close' <- HE.http url (handleHttpReply close) mgr
+        close' <- liftIO $ E.run_ $ HE.http url (handleHttpReply close) mgr
         if close'
             then return Nothing
             else serveConnection'
