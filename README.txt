@@ -25,8 +25,11 @@ Known Issues
    of the request body before it pushes it upstream. This is a problem that
    needs to be fixed in by extending Wai.
 
-Require Features
-================
+Required Features
+=================
+
+ - Add a cabal file and release on Hackage.
+
  - A config hook to allow the request sent by the client to be modified before
    the proxy acts on it.
 
