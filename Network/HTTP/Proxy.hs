@@ -16,10 +16,20 @@
 --
 ---------------------------------------------------------
 
+-- | This module a contains a simple HTTP and HTTPS proxy. In the most basic
+-- setup, the caller runs it on a specified port as follows:
+--
+-- > -- Run a HTTPS and HTTPS proxy on port 3128.
+-- > import Network.HTTP.Proxy
+-- >
+-- > main :: IO ()
+-- > main = runProxy 3128
+-- >
+--
+
 module Network.HTTP.Proxy
-	( run
-	, runSettings
-	, runSettingsSocket
+	( runProxy
+	, runProxySettings
 
 	, Settings (..)
 	, defaultSettings
@@ -109,45 +119,40 @@ bindPort p s = do
             return sock
         )
 
--- | Run an 'Application' on the given port. This calls 'runSettings' with
--- 'defaultSettings'.
-run :: Port -> IO ()
-run p = runSettings defaultSettings { settingsPort = p }
+-- | Run a HTTP and HTTPS proxy server on the specified port. This calls
+-- 'runProxySettings' with 'defaultSettings'.
+runProxy :: Port -> IO ()
+runProxy p = runProxySettings defaultSettings { proxyPort = p }
 
--- | Run a Warp server with the given settings.
-runSettings :: Settings -> IO ()
+-- | Run a HTTP and HTTPS proxy server with the specified settings.
+runProxySettings :: Settings -> IO ()
 #if WINDOWS
-runSettings set = withSocketsDo $ do
+runProxySettings set = withSocketsDo $ do
     var <- MV.newMVar Nothing
     let clean = MV.modifyMVar_ var $ \s -> maybe (return ()) sCloseX s >> return Nothing
     _ <- forkIO $ bracket
-        (bindPort (settingsPort set) (settingsHost set))
+        (bindPort (proxyPort set) (proxyHost set))
         (const clean)
         (\s -> do
             MV.modifyMVar_ var (\_ -> return $ Just s)
             runSettingsSocket set s)
     forever (threadDelay maxBound) `finally` clean
 #else
-runSettings set =
+runProxySettings set =
     bracket
-        (bindPort (settingsPort set) (settingsHost set))
+        (bindPort (proxyPort set) (proxyHost set))
         sCloseX
         (runSettingsSocket set)
 #endif
 
 type Port = Int
 
--- | Same as 'runSettings', but uses a user-supplied socket instead of opening
--- one. This allows the user to provide, for example, Unix named socket, which
--- can be used when reverse HTTP proxying into your application.
---
--- Note that the 'settingsPort' will still be passed to 'Application's via the
--- 'serverPort' record.
+
 runSettingsSocket :: Settings -> Socket -> IO ()
 runSettingsSocket set sock = do
-    let onE = settingsOnException set
-        port = settingsPort set
-    tm <- T.initialize $ settingsTimeout set * 1000000
+    let onE = proxyOnException set
+        port = proxyPort set
+    tm <- T.initialize $ proxyTimeout set * 1000000
     mgr <- HE.newManager
     forever $ do
         (conn, sa) <- accept sock
@@ -493,33 +498,33 @@ iterSocket th sock toClose =
         liftIO $ T.pause th
         E.continue step
 
--- | Various Warp server settings. This is purposely kept as an abstract data
+-- | Various proxy server settings. This is purposely kept as an abstract data
 -- type so that new settings can be added without breaking backwards
 -- compatibility. In order to create a 'Settings' value, use 'defaultSettings'
 -- and record syntax to modify individual records. For example:
 --
--- > defaultSettings { settingsTimeout = 20 }
+-- > defaultSettings { proxyPort = 3128 }
 data Settings = Settings
-    { settingsPort :: Int -- ^ Port to listen on. Default value: 3000
-    , settingsHost :: String -- ^ Host to bind to, or * for all. Default value: *
-    , settingsOnException :: SomeException -> IO () -- ^ What to do with exceptions thrown by either the application or server. Default: ignore server-generated exceptions (see 'InvalidRequest') and print application-generated applications to stderr.
-    , settingsTimeout :: Int -- ^ Timeout value in seconds. Default value: 30
+    { proxyPort :: Int -- ^ Port to listen on. Default value: 3100
+    , proxyHost :: String -- ^ Host to bind to, or * for all. Default value: *
+    , proxyOnException :: SomeException -> IO () -- ^ What to do with exceptions thrown by either the application or server. Default: ignore server-generated exceptions (see 'InvalidRequest') and print application-generated applications to stderr.
+    , proxyTimeout :: Int -- ^ Timeout value in seconds. Default value: 30
     }
 
--- | The default settings for the Warp server. See the individual settings for
+-- | The default settings for the Proxy server. See the individual settings for
 -- the default value.
 defaultSettings :: Settings
 defaultSettings = Settings
-    { settingsPort = 3000
-    , settingsHost = "*"
-    , settingsOnException = \e ->
+    { proxyPort = 3100
+    , proxyHost = "*"
+    , proxyOnException = \e ->
         case fromException e of
             Just x -> go x
             Nothing ->
                 if go' $ fromException e
                     then hPutStrLn stderr $ show e
                     else return ()
-    , settingsTimeout = 30
+    , proxyTimeout = 30
     }
   where
     go :: InvalidRequest -> IO ()
