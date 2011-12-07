@@ -80,13 +80,11 @@ import Data.Monoid (mappend, mconcat)
 
 import Control.Monad.IO.Class (liftIO)
 import qualified Network.HTTP.Proxy.Timeout as T
-import Data.List (foldl')
+import Data.List (delete, foldl')
 import Control.Monad (forever, when)
 import qualified Network.HTTP.Types as H
 import qualified Data.CaseInsensitive as CI
 import System.IO (hPutStrLn, stderr)
-
-import Data.List (delete)
 
 #if WINDOWS
 import Control.Concurrent (threadDelay)
@@ -111,7 +109,7 @@ bindPort p s = do
         addr = if null addrs' then head addrs else head addrs'
     bracketOnError
         (Network.Socket.socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr))
-        (sCloseX)
+        sCloseX
         (\sock -> do
             setSocketOption sock ReuseAddr 1
             bindSocket sock (addrAddress addr)
@@ -215,7 +213,7 @@ serveConnection th tm onException port conn remoteHost' mgr = do
         req <- parseRequest port remoteHost'
         --liftIO $ print $ requestHeaders req
         case req of
-            _ | requestMethod req == "GET" || requestMethod req == "POST" ->
+            _ | requestMethod req `elem` [ "GET", "POST" ] ->
                 proxyPlain req
             _ | requestMethod req == "CONNECT" ->
                 case B.split ':' (rawPathInfo req) of
@@ -233,14 +231,12 @@ serveConnection th tm onException port conn remoteHost' mgr = do
                 let hasClose hdrs = (== "close") . CI.mk <$> lookup "connection" hdrs
                     mClose = hasClose (requestHeaders req)
                     -- RFC2616: Connection defaults to Close in HTTP/1.0 and Keep-Alive in HTTP/1.1
-                    defaultClose = if httpVersion req == H.HttpVersion 1 0
-                                       then True
-                                       else False
+                    defaultClose = httpVersion req == H.HttpVersion 1 0
                 in  fromMaybe defaultClose mClose
             outHdrs = [(n,v) | (n,v) <- requestHeaders req, n `notElem` [
                           "Host", "Content-Length"
                       ]]
-        liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ (B.unpack urlStr)
+        liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
         let contentLength = if requestMethod req == "GET"
                                 then 0
                                 else read . B.unpack . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
@@ -281,19 +277,19 @@ failRequest th conn req headerMsg bodyMsg = do
 
 proxyConnect :: T.Handle -> T.Manager -> (SomeException -> IO ()) -> Socket -> ByteString -> Int -> Request -> E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
 proxyConnect th tm onException conn host prt req = do
-        liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ (B.unpack host)++":" ++ show prt
+        liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack host ++ ":" ++ show prt
         mHandles <- liftIO $ do
             s <- connectTo (B.unpack host) (PortNumber . fromIntegral $ prt)
             let eh = enumSocket th 65536 s
                 ih = iterSocket th s True
             return $ Right (s, eh, ih)
-          `catch` \(exc :: IOException) -> do
+          `catch` \(exc :: IOException) ->
             return $ Left $ "Unable to connect: " `mappend` B.pack (show exc)
         case mHandles of
             Right (s, eh, ih) -> do
                 tid <- liftIO $ forkIO $ do
                     wrTh <- T.registerKillThread tm
-                    (E.run_ $ eh $$ mkHeaders (httpVersion req) H.statusOK [] $$ iterSocket wrTh conn True)
+                    E.run_ (eh $$ mkHeaders (httpVersion req) H.statusOK [] $$ iterSocket wrTh conn True)
                         `catch` onException
                     T.cancel wrTh
                 ih
@@ -320,7 +316,7 @@ connect' host serv = do
   tryToConnect addr =
     bracketOnError
 	(socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr))
-	(sClose)  -- only done if there's an error
+	sClose  -- only done if there's an error
 	(\sock -> do
           connect sock (addrAddress addr)
           return sock
@@ -374,7 +370,7 @@ parseRequest' port (firstLine:otherLines) remoteHost' = do
     let host = case (host', lookup "host" heads) of
             ("", Just h) -> h
             (h, _)       -> h
-    return $ Request
+    return Request
                 { requestMethod = method
                 , httpVersion = httpversion
                 , pathInfo = H.decodePathSegments rpath
@@ -421,8 +417,8 @@ colonSpaceBuilder = copyByteString ": "
 headers :: H.HttpVersion -> H.Status -> H.ResponseHeaders -> Bool -> Builder
 headers !httpversion !status !responseHeaders !isChunked' = {-# SCC "headers" #-}
     let !start = httpBuilder
-                `mappend` (copyByteString $
-                            case httpversion of
+                `mappend` copyByteString
+                            (case httpversion of
                                 H.HttpVersion 1 1 -> "1.1"
                                 _ -> "1.0")
                 `mappend` spaceBuilder
@@ -462,7 +458,7 @@ enumSocket th len sock =
         liftIO $ T.tickle th
         if S.null bs
             then do
-                liftIO $ do
+                liftIO $
                     shutdownX sock ShutdownReceive
                   `catch` \(exc :: IOException) ->
                     putStrLn $ "couldn't shutdown read side of " ++ show sock++": " ++ show exc
@@ -480,16 +476,16 @@ iterSocket th sock toClose =
     E.continue step
   where
     -- We pause timeouts before passing control back to user code. This ensures
-    -- that a timeout will only ever be executed when Warp is in control. We
+    -- that a timeout will only ever be executed when the proxy is in control. We
     -- also make sure to resume the timeout after the completion of user code
     -- so that we can kill idle connections.
     step E.EOF = do
         liftIO $ T.resume th
-        when toClose $ do
-            liftIO $ do
+        when toClose $
+            liftIO $
                 shutdownX sock ShutdownSend
               `catch` \(exc :: IOException) ->
-                putStrLn $ "couldn't shutdown send side of " ++ show sock++": " ++ show exc
+                putStrLn $ "couldn't shutdown send side of " ++ show sock ++ ": " ++ show exc
         E.yield () E.EOF
     step (E.Chunks []) = E.continue step
     step (E.Chunks xs) = do
@@ -521,9 +517,8 @@ defaultSettings = Settings
         case fromException e of
             Just x -> go x
             Nothing ->
-                if go' $ fromException e
-                    then hPutStrLn stderr $ show e
-                    else return ()
+                when (go' $ fromException e)
+					$ hPutStrLn stderr $ show e
     , proxyTimeout = 30
     }
   where
@@ -606,7 +601,7 @@ serverHeader hdrs = case lookup key hdrs of
     Nothing  -> server : hdrs
     Just svr -> servers svr : delete (key,svr) hdrs
  where
-    key = "Server"
-    ver = B.pack $ "Proxy/0.0"
+    key = "Via"
+    ver = B.pack "Proxy/0.0"
     server = (key, ver)
     servers svr = (key, S.concat [svr, " ", ver])
