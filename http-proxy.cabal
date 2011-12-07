@@ -1,15 +1,27 @@
-Name:                http-proxy
-Version:             0.0
-Synopsis:            A library for writing HTTP and HTTPS proxies
-License:             BSD3
-License-file:        LICENSE
-Author:              Michael Snoyman, Stephen Blackheath, Erik de Castro Lopo
-Maintainer:          erikd@mega-nerd.com
-Homepage:            https://github.com/erikd/http-proxy
-Category:            Web
-Build-Type:          Simple
-Cabal-Version:       >=1.6
-Stability:           Experimental
+Name:           http-proxy
+Version:        0.0
+License:        BSD3
+License-file:   LICENSE
+Author:         Michael Snoyman, Stephen Blackheath, Erik de Castro Lopo
+Maintainer:     erikd@mega-nerd.com
+Homepage:       https://github.com/erikd/http-proxy
+Category:       Web
+Build-Type:     Simple
+Cabal-Version:  >=1.6
+Stability:      Experimental
+
+Synopsis:       A library for writing HTTP and HTTPS proxies
+
+Description:
+  http-proxy is a library for writing HTTP and HTTPS proxies.
+  .
+  Use of the enumerator library provides file streaming from the upstream server
+  through the proxy to the client program. Memory usage of the proxy depends on
+  number of files being downlaoded simultaneously, not the size of the files
+  being downloaded.
+  .
+  Eventually, features like logging, request re-writing, disk caching etc will
+  be made available via caller provided functions in the Settings data type.
 
 flag network-bytestring
     Default: False
@@ -18,11 +30,11 @@ Library
   Build-Depends:     base                          >= 3        && < 5
                    , bytestring                    >= 0.9.1.4  && < 0.10
                    , wai                           >= 0.4      && < 0.5
+                   , enumerator                    >= 0.4.8    && < 0.5
+                   , http-enumerator               >= 0.7      && < 0.8
                    , blaze-builder-enumerator      >= 0.2      && < 0.3
                    , transformers                  >= 0.2.2    && < 0.3
-                   , enumerator                    >= 0.4.8    && < 0.5
                    , blaze-builder                 >= 0.2.1.4  && < 0.4
-                   , http-enumerator               >= 0.7      && < 0.8
                    , http-types                    >= 0.6      && < 0.7
                    , case-insensitive              >= 0.2
                    , unix-compat                   >= 0.2
