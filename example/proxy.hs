@@ -1,7 +1,7 @@
 
-import qualified Network.HTTP.Proxy as Proxy
+import Network.HTTP.Proxy
 
 main :: IO ()
-main = Proxy.run 31081
+main = runProxy 31081
 
 
