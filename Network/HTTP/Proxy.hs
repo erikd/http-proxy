@@ -16,8 +16,8 @@
 --
 ---------------------------------------------------------
 
--- | This module a contains a simple HTTP and HTTPS proxy. In the most basic
--- setup, the caller runs it on a specified port as follows:
+-- | This module contains a simple HTTP and HTTPS proxy. In the most basic
+-- setup, the caller specifies a port and runds it as follows:
 --
 -- > -- Run a HTTPS and HTTPS proxy on port 3128.
 -- > import Network.HTTP.Proxy
@@ -42,7 +42,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Unsafe as SU
 import qualified Data.ByteString.Char8 as B
-import qualified Data.ByteString.Lazy as L
+
 import Network    ( PortID(..) )
 import Network.Socket
     ( accept, Family (..)
@@ -74,9 +74,9 @@ import qualified Data.Enumerator.List as EL
 import qualified Data.Enumerator.Binary as EB
 
 import Blaze.ByteString.Builder
-    (copyByteString, Builder, toByteString, fromByteString)
+    (copyByteString, Builder, toByteString)
 import Blaze.ByteString.Builder.Char8 (fromChar, fromShow)
-import Data.Monoid (mappend, mconcat)
+import Data.Monoid (mappend)
 
 import Control.Monad.IO.Class (liftIO)
 import qualified Network.HTTP.Proxy.Timeout as T
@@ -240,15 +240,16 @@ serveConnection th tm onException port conn remoteHost' mgr = do
         let contentLength = if requestMethod req == "GET"
                                 then 0
                                 else read . B.unpack . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
-        postBody <- mconcat . L.toChunks <$> EB.take contentLength
-                                       -- This loads it all into memory at once.
-                                       -- TO DO: Stream via iteratee
-        let enumPostBody = E.enumList 1 [fromByteString postBody]
+
+        -- This should be fully lazy and interleaved reads from the client and
+        -- writes to the server. Need to test that this in fact the case.
+        -- If it doesn't, try wrapping the 'EB.take' in in 'EB.run_'.
+        postBody <- EB.take contentLength
         url <-
             (\url -> url { HE.method = requestMethod req,
                            HE.requestHeaders = outHdrs,
                            HE.rawBody = True,
-                           HE.requestBody = HE.RequestBodyEnum (fromIntegral contentLength) enumPostBody })
+                           HE.requestBody = HE.RequestBodyLBS postBody })
             <$> liftIO (HE.parseUrl (B.unpack urlStr))
         close' <- liftIO $ E.run_ $ HE.http url (handleHttpReply close) mgr
         if close'
