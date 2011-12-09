@@ -85,6 +85,7 @@ import Control.Monad (forever, when)
 import qualified Network.HTTP.Types as H
 import qualified Data.CaseInsensitive as CI
 import System.IO (hPutStrLn, stderr)
+import Numeric (readDec)
 
 #if WINDOWS
 import Control.Concurrent (threadDelay)
@@ -217,7 +218,7 @@ serveConnection th tm onException port conn remoteHost' mgr = do
                 proxyPlain req
             _ | requestMethod req == "CONNECT" ->
                 case B.split ':' (rawPathInfo req) of
-                    [h, p] -> proxyConnect th tm onException conn h (read $ B.unpack p) req
+                    [h, p] -> proxyConnect th tm onException conn h (readDecimal $ B.unpack p) req
                     _	-> failRequest th conn req "Bad request" ("Bad request '" `mappend` rawPathInfo req `mappend` "'.")
             _ | otherwise ->
                 failRequest th conn req "Unknown request" ("Unknown request '" `mappend` rawPathInfo req `mappend` "'.")
@@ -239,17 +240,17 @@ serveConnection th tm onException port conn remoteHost' mgr = do
         liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
         let contentLength = if requestMethod req == "GET"
                                 then 0
-                                else read . B.unpack . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
+                                else readDecimal . B.unpack . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
 
         -- This should be fully lazy and interleaved reads from the client and
         -- writes to the server. Need to test that this in fact the case.
         -- If it doesn't, try wrapping the 'EB.take' in in 'EB.run_'.
         postBody <- EB.take contentLength
         url <-
-            (\url -> url { HE.method = requestMethod req,
-                           HE.requestHeaders = outHdrs,
-                           HE.rawBody = True,
-                           HE.requestBody = HE.RequestBodyLBS postBody })
+            (\u -> u { HE.method = requestMethod req,
+                       HE.requestHeaders = outHdrs,
+                       HE.rawBody = True,
+                       HE.requestBody = HE.RequestBodyLBS postBody })
             <$> liftIO (HE.parseUrl (B.unpack urlStr))
         close' <- liftIO $ E.run_ $ HE.http url (handleHttpReply close) mgr
         if close'
@@ -606,3 +607,11 @@ serverHeader hdrs = case lookup key hdrs of
     ver = B.pack "Proxy/0.0"
     server = (key, ver)
     servers svr = (key, S.concat [svr, " ", ver])
+
+
+readDecimal :: Num a => String -> a
+readDecimal s =
+    case readDec s of
+      [] -> 0
+      (x, _):_ -> x
+
