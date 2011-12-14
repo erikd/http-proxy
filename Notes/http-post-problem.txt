@@ -36,10 +36,10 @@ However, in writing a simple http client program I have proved to myself that
 HTTP POSTing large files (eg files larger than the amount of RAM on the machine)
 is possible doing something like this:
 
-      doRequest $ req
-          { HE.method = "POST"
-          , HE.requestBody = HE.RequestBodyEnum size enumBuilder
-          }
+    doRequest $ req
+        { HE.method = "POST"
+        , HE.requestBody = HE.RequestBodyEnum size enumBuilder
+        }
     where
       enumBuilder :: Enumerator Builder IO ()
       enumBuilder = EB.enumFile fname $= EL.map fromByteString
@@ -96,8 +96,8 @@ but that still isn't lazy enough or rather, implemented like this, my proxy
 still tries to pull the whole request body into memory before starting to send
 it to the server.
 
-b) Fix RequestBodyLBS #2
-------------------------
+c) Force Chunking in enumLazyBuilder
+------------------------------------
 
 At this point I suspected that I needed to re-write enumLazyBuilder to chunk
 up the lazy ByteString before converting it to a Blaze.Builder. I came up with
@@ -112,3 +112,16 @@ this:
 
 Unfortunately even with this this the proxy still tried to load the whole
 of the POST body into memory before sending it.
+
+d) Fix Lazy ByteString from the Iteratee
+----------------------------------------
+
+In http-proxy I have code that looks like:
+
+    postBody <- EB.take contentLength
+    doRequest $ req
+        { HE.method = "POST"
+        , HE.requestBody = HE.RequestBodyLBS postBody
+        }
+
+My next hypothesis was that EB.take was being more eager than it should be.
