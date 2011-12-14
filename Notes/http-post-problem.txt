@@ -1,0 +1,100 @@
+The Problem of Large POST Request Bodies
+========================================
+
+HTTP POST requests have a request body. Usually these are small, but in the case
+of doing a HTTP upload to a server (eg submitting a package to Hackage) the
+request body can be quite large.
+
+One of the main goals of http-proxy is to have all operations scale with the
+number of concurrent connections and independently of size of the items being
+up or down loaded.
+
+With the current implementation of http-proxy using Wai, Warp and http-enumerator
+which in turn all use John Millikin 's enumerator package, the problem is that
+the http-proxy uses an Iteratee to read the request from the client but needs to
+create an Enumerator to send the request upstream to the target server using
+http-enumerator. The http-enumerator request body is built using a RequestBody
+defined as:
+
+    data RequestBody m
+        = RequestBodyLBS ByteString
+        | RequestBodyBS ByteString
+        | RequestBodyBuilder Int64 Builder
+        | RequestBodyEnum Int64 (Enumerator Builder m ())
+        | RequestBodyEnumChunked (Enumerator Builder m ())
+
+Of these options, RequestBodyBS is obviously out because it uses a strict
+ByteString and even RequestBodyLBS is out because even if you supply it with a
+lazy ByteString, http-enumerator still renders it into a single Blaze.Builder
+using:
+
+    enumSingle :: Monad m => a -> Enumerator a m b
+    enumSingle x (Continue k) = k $ Chunks [x]
+    enumSingle _ step = returnI step
+
+However, in writing a simple http client program I have proved to myself that
+HTTP POSTing large files (eg files larger than the amount of RAM on the machine)
+is possible doing something like this:
+
+      doRequest $ req
+          { HE.method = "POST"
+          , HE.requestBody = HE.RequestBodyEnum size enumBuilder
+          }
+    where
+      enumBuilder :: Enumerator Builder IO ()
+      enumBuilder = EB.enumFile fname $= EL.map fromByteString
+
+so the whole Enumerator Builder thing can do it, because it avoids the
+enumSingle function.
+
+I list below various attempts to fix this problem.
+
+
+a) Use RequestBodyEnum
+----------------------
+
+The idea here is to use an Iteratee to pull the data from the client and the do
+something like enumBuilder above to pass the data to http-enumerator.
+Unfortunately this simply didn't work. I'm pretty sure the reason for the
+failure was that my code assumed that in the context of enumBuilder, the
+Iteratee in scope was the one pulling data from the client when it was in fact
+the Iteratee in the http-enumerator context.
+
+b) Fix RequestBodyLBS
+---------------------
+
+Inside http-enumerator, where http function turns the RequestBody data type into
+an Enumerator, the existing code did the following:
+
+    RequestBodyLBS lbs ->
+        (Just $ L.length lbs, enumSingle $ Blaze.fromLazyByteString lbs)
+
+Obviously, calculating the length of a lazy ByteString will cause the whole
+thing to be loaded into memory and enumSingle also problematic.
+
+However, it is not unreasonable to require that every POST operation that uses
+the RequestBodyLBS should also provide a Content-Length header. The content
+length can then be calculated with a function like this:
+
+    getContentLength hdrs =
+        read $ S8.unpack $ fromMaybe "0" $ lookup "content-length" hdrs
+
+which sanely defaults to zero if there is no Content-Length header. The
+RequestBodyLBS handler can then be re-written as:
+
+    RequestBodyLBS lbs ->
+        (Just $ getContentLength requestHeaders, enumLazyBuilder lbs)
+
+with enumLazyBuilder implemented as:
+
+    enumLazyBuilder :: Monad m => L.ByteString -> Enumerator Blaze.Builder m b
+    enumLazyBuilder x (Continue k) =
+        k $ Chunks (map Blaze.fromByteString (L.toChunks x))
+    enumLazyBuilder _ step = returnI step
+
+but that still isn't lazy enough or rather, implemented like this, my proxy
+still tries to pull the whole request body into memory before starting to send
+it to the server.
+
+
+
