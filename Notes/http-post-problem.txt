@@ -96,5 +96,19 @@ but that still isn't lazy enough or rather, implemented like this, my proxy
 still tries to pull the whole request body into memory before starting to send
 it to the server.
 
+b) Fix RequestBodyLBS #2
+------------------------
 
+At this point I suspected that I needed to re-write enumLazyBuilder to chunk
+up the lazy ByteString before converting it to a Blaze.Builder. I came up with
+this:
 
+    enumLazyBuilder :: Monad m => L.ByteString -> Enumerator Blaze.Builder m b
+    enumLazyBuilder = EI.checkContinue1 $ \loop lbs k -> do
+        let (start, rest) = L.splitAt 4096 lbs
+        if L.null start
+            then continue k
+            else k (Chunks [Blaze.fromLazyByteString start]) >>== loop rest
+
+Unfortunately even with this this the proxy still tried to load the whole
+of the POST body into memory before sending it.
