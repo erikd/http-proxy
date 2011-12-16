@@ -68,7 +68,7 @@ import qualified Network.HTTP.Enumerator as HE
 
 import Data.Typeable (Typeable)
 
-import Data.Enumerator (($$), (=$), (>>==))
+import Data.Enumerator hiding (filter, head, foldl', map)
 import qualified Data.Enumerator as E
 import qualified Data.Enumerator.List as EL
 import qualified Data.Enumerator.Binary as EB
@@ -171,15 +171,15 @@ sCloseX s = do
 
 shutdownX :: Socket -> ShutdownCmd -> IO ()
 shutdownX s ShutdownReceive = do
-    when verboseSockets $ putStrLn ("shutdown " ++ show s++" ShutdownReceive")
+    when verboseSockets $ putStrLn ("shutdown " ++ show s ++ " ShutdownReceive")
     shutdown s ShutdownReceive
 
 shutdownX s ShutdownSend = do
-    when verboseSockets $ putStrLn ("shutdown " ++ show s++" ShutdownSend")
+    when verboseSockets $ putStrLn ("shutdown " ++ show s ++ " ShutdownSend")
     shutdown s ShutdownSend
 
 shutdownX s ShutdownBoth = do
-    when verboseSockets $ putStrLn ("shutdown " ++ show s++" ShutdownBoth")
+    when verboseSockets $ putStrLn ("shutdown " ++ show s ++ " ShutdownBoth")
     shutdown s ShutdownBoth
 
 mkHeaders :: Monad m
@@ -239,8 +239,8 @@ serveConnection th tm onException port conn remoteHost' mgr = do
                       ]]
         liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
         let contentLength = if requestMethod req == "GET"
-                                then 0
-                                else readDecimal . B.unpack . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
+              then 0
+              else readDecimal . B.unpack . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
 
         -- This should be fully lazy and interleaved reads from the client and
         -- writes to the server. Need to test that this in fact the case.
