@@ -113,8 +113,8 @@ this:
 Unfortunately even with this this the proxy still tried to load the whole
 of the POST body into memory before sending it.
 
-d) Fix Lazy ByteString from the Iteratee
-----------------------------------------
+d) Make EB.take lazier
+----------------------
 
 In http-proxy I have code that looks like:
 
@@ -124,4 +124,57 @@ In http-proxy I have code that looks like:
         , HE.requestBody = HE.RequestBodyLBS postBody
         }
 
-My next hypothesis was that EB.take was being more eager than it should be.
+My next hypothesis was that EB.take was being more eager than it should be. The
+actual implementation of EB.take seemed to confirm this:
+
+    take :: Monad m => Integer -> Iteratee B.ByteString m BL.ByteString
+    take n | n <= 0 = return BL.empty
+    take n = continue (loop id n) where
+        loop acc n' (Chunks xs) = iter where
+            lazy = BL.fromChunks xs
+            len = toInteger (BL.length lazy)
+
+            iter = if len < n'
+                then continue (loop (acc . BL.append lazy) (n' - len))
+                else let
+                    (xs', extra) = BL.splitAt (fromInteger n') lazy
+                    in yield (acc xs') (toChunks extra)
+        loop acc _ EOF = yield (acc BL.empty) EOF
+
+One obvious problem here is the call of BL.length on the lazy ByteString. With
+this implementation, my http-proxy would try to load the whole of the request
+body into memory so that the length could calculated.
+
+Rewriting a lazier replacement function is pretty easy:
+
+    lazyTake :: Monad m => Integer -> Iteratee ByteString m LBS.ByteString
+    lazyTake n | n <= 0 = return LBS.empty
+    lazyTake n = continue (loop id n) where
+        loop acc n' (Chunks []) = continue (loop acc n')
+        loop acc n' (Chunks (x:xs)) = iter where
+            len = toInteger (B.length x)
+
+            iter = if len <= n'
+                then continue (loop (acc . LBS.append (LBS.fromChunks [x])) (n' - len))
+                else let
+                    (start, extra) = B.splitAt (fromInteger n') x
+                    in yield (acc (LBS.fromChunks [start])) (Chunks (extra:xs))
+        loop acc _ EOF = yield (acc LBS.empty) EOF
+
+Plugging this into the http-proxy doesn't fix the problem. Using it like:
+
+    postBody <- lazyTake contentLength
+
+still sucks the whole request body into memory. Wrapping the call in E.run_
+like this:
+
+    postBody <- E.run_ $ lazyTake contentLength
+
+nor does this:
+
+    postBody <- liftIO $ E.run_ $ lazyTake contentLength
+
+but these two have a different failure mode. With E.run_, the client program
+connecting to the proxy and doing the HTTP POST receives a "Connection reset by
+peer" error.
+
