@@ -234,9 +234,7 @@ serveConnection th tm onException port conn remoteHost' mgr = do
                     -- RFC2616: Connection defaults to Close in HTTP/1.0 and Keep-Alive in HTTP/1.1
                     defaultClose = httpVersion req == H.HttpVersion 1 0
                 in  fromMaybe defaultClose mClose
-            outHdrs = [(n,v) | (n,v) <- requestHeaders req, n `notElem` [
-                          "Host", "Content-Length"
-                      ]]
+            outHdrs = [(n,v) | (n,v) <- requestHeaders req, n /= "Host"]
         liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
         let contentLength = if requestMethod req == "GET"
               then 0
@@ -463,7 +461,7 @@ enumSocket th len sock =
                 liftIO $
                     shutdownX sock ShutdownReceive
                   `catch` \(exc :: IOException) ->
-                    putStrLn $ "couldn't shutdown read side of " ++ show sock++": " ++ show exc
+                    putStrLn $ "couldn't shutdown read side of " ++ show sock ++ ": " ++ show exc
                 E.continue k
             else k (E.Chunks [bs]) >>== inner
     inner step = E.returnI step
