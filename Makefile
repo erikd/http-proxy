@@ -7,7 +7,8 @@ LIBSRC = $(shell find Network -name \*.hs)
 all : $(TARGETS)
 
 clean :
-	rm -f *.o *.hi $(TARGETS)
+	find . -name \*.o -o -name \*.hi -exec rm -f {} \;
+	rm -f $(TARGETS)
 
 proxy : example/proxy.hs $(LIBSRC)
 	$(GHC) --make $< -o $@
