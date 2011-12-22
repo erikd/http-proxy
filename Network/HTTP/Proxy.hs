@@ -17,7 +17,7 @@
 ---------------------------------------------------------
 
 -- | This module contains a simple HTTP and HTTPS proxy. In the most basic
--- setup, the caller specifies a port and runds it as follows:
+-- setup, the caller specifies a port and runs it as follows:
 --
 -- > -- Run a HTTPS and HTTPS proxy on port 3128.
 -- > import Network.HTTP.Proxy
