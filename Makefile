@@ -1,6 +1,6 @@
 TARGETS = proxy
 
-GHC = ghc -Wall -fwarn-missing-signatures -i:src
+GHC = ghc -Wall -fwarn-missing-signatures -fwarn-tabs -i:src
 
 LIBSRC = $(shell find Network -name \*.hs)
 
