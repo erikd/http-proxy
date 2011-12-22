@@ -1,6 +1,11 @@
 The Problem of Large POST Request Bodies
 ========================================
 
+This problem was finally solved on 2011/12/22. This file documents some of the
+crazy things that were tried when trying to come up with a solution.
+
+The Problem
+-----------
 HTTP POST requests have a request body. Usually these are small, but in the case
 of doing a HTTP upload to a server (eg submitting a package to Hackage) the
 request body can be quite large.
@@ -55,15 +60,16 @@ a) Use RequestBodyEnum
 
 The idea here is to use an Iteratee to pull the data from the client and the do
 something like enumBuilder above to pass the data to http-enumerator.
-Unfortunately this simply didn't work. I'm pretty sure the reason for the
-failure was that my code assumed that in the context of enumBuilder, the
-Iteratee in scope was the one pulling data from the client when it was in fact
-the Iteratee in the http-enumerator context.
+Unfortunately this simply didn't work, the Iteratee would read zero bytes of
+data. I'm pretty sure the reason for this was that my code assumed that in the
+context of enumBuilder, the Iteratee in scope was the one pulling data from the
+client when it was in fact the Iteratee in the http-enumerator context.
+
 
 b) Fix RequestBodyLBS
 ---------------------
 
-Inside http-enumerator, where http function turns the RequestBody data type into
+Inside http-enumerator, the http function turns the RequestBody data type into
 an Enumerator, the existing code did the following:
 
     RequestBodyLBS lbs ->
@@ -96,6 +102,7 @@ but that still isn't lazy enough or rather, implemented like this, my proxy
 still tries to pull the whole request body into memory before starting to send
 it to the server.
 
+
 c) Force Chunking in enumLazyBuilder
 ------------------------------------
 
@@ -112,6 +119,7 @@ this:
 
 Unfortunately even with this this the proxy still tried to load the whole
 of the POST body into memory before sending it.
+
 
 d) Make EB.take lazier
 ----------------------
@@ -177,4 +185,20 @@ nor does this:
 but these two have a different failure mode. With E.run_, the client program
 connecting to the proxy and doing the HTTP POST receives a "Connection reset by
 peer" error.
+
+
+e) Nesting Iteratee inside an Enumerator
+----------------------------------------
+
+This is the trick that finally made the whole thing work. Specifically the
+function:
+
+    -- Create an Enumerator from an Iteratee.
+    -- The first parameter is the number of bytes to be pulled from the Iteratee.
+    -- The second is an Iteratee that can pull the data from the source in chunks.
+    -- The return value is an Enumerator that operates inside the Iteratee monad.
+    enumIteratee :: MonadIO m => Int64
+                 -> (Int64 -> Iteratee ByteString m ByteString)
+                 -> Enumerator ByteString (Iteratee ByteString m) c
+
 
