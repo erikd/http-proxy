@@ -272,41 +272,41 @@ serveConnection th tm onException port conn remoteHost' mgr = do
 -- The second is an Iteratee that can pull the data from the source in chunks.
 -- The return value is an Enumerator that operates inside the Iteratee monad.
 enumIteratee :: MonadIO m => Int64
-             -> (Int64 -> Iteratee ByteString m ByteString)
+             -> (Int -> Iteratee ByteString m ByteString)
              -> Enumerator ByteString (Iteratee ByteString m) c
-enumIteratee maxlen iter = inner 0
+enumIteratee maxlen takeMax = inner 0
   where
     blockLen = 32768
     inner count (Continue k)
         | count >= maxlen = k (Chunks [])
         | count + blockLen <= maxlen = do
-                  bs <- lift $ iter blockLen
+                  bs <- lift $ takeMax $ fromIntegral blockLen
                   if B.null bs
                       then k EOF
                       else k (Chunks [bs]) >>== inner (count + blength bs)
         | otherwise = do
-                  bs <- lift $ iter (maxlen - count)
+                  bs <- lift $ takeMax $ fromIntegral (maxlen - count)
                   if B.null bs
                       then k EOF
                       else k (Chunks [bs]) >>== inner (count + blength bs)
     inner _ step = returnI step
     blength = fromIntegral . B.length
 
+-- Take up to maxlen bytes of data as lazily as possible. Avoid splitting and
+-- joining ByteStrings as much as possible.
+lazyTakeMax :: Monad m => Int -> Iteratee ByteString m ByteString
+lazyTakeMax maxlen | maxlen <= 0 = return B.empty
+lazyTakeMax maxlen = continue step
+  where
+    step (Chunks []) = continue step
 
-lazyTake :: Monad m => Int64 -> Iteratee ByteString m ByteString
-lazyTake n | n <= 0 = return B.empty
-lazyTake n = continue (loop id n) where
-	loop acc n' (Chunks []) = continue (loop acc n')
-	loop acc n' (Chunks (x:xs)) = iter where
-		len = fromIntegral (B.length x)
+    step (Chunks (x:xs))
+        | B.length x < maxlen = yield x (Chunks xs)
+        | otherwise =
+                let (start, extra) = B.splitAt maxlen x
+                in yield start (Chunks (extra:xs))
 
-		iter
-		    | len < n'  = continue (loop (acc . B.append x) (n' - len))
-		    | len == n' = yield (acc x) (Chunks xs)
-		    | otherwise =
-                 let (start, extra) = B.splitAt (fromIntegral n') x
-				in yield (acc start) (Chunks (extra:xs))
-	loop acc _ EOF = yield (acc B.empty) EOF
+    step EOF = yield B.empty EOF
 
 --------------------------------------------------------------------------------
 
