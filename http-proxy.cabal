@@ -15,10 +15,10 @@ Synopsis:       A library for writing HTTP and HTTPS proxies
 Description:
   http-proxy is a library for writing HTTP and HTTPS proxies.
   .
-  Use of the enumerator library provides file streaming from the upstream server
-  through the proxy to the client program. Memory usage of the proxy depends on
-  number of files being downlaoded simultaneously, not the size of the files
-  being downloaded.
+  Use of the enumerator library provides file streaming via the proxy in both
+  directions. Memory usage of the proxy scales linearly with the number of
+  simultaneous connections and is independent of the size of the files being
+  uploaded or downloaded.
   .
   Eventually, features like logging, request re-writing, disk caching etc will
   be made available via caller provided functions in the Settings data type.
