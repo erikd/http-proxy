@@ -229,7 +229,7 @@ serveConnection th tm onException port conn remoteHost' mgr = do
     proxyPlain req = do
         let urlStr = "http://" `mappend` serverName req
                                `mappend` rawPathInfo req
-                               `mappend` H.renderQuery True (queryString req)
+                               `mappend` rawQueryString req
             close =
                 let hasClose hdrs = (== "close") . CI.mk <$> lookup "connection" hdrs
                     mClose = hasClose (requestHeaders req)
