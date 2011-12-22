@@ -74,11 +74,12 @@ import qualified Data.Enumerator.List as EL
 import qualified Data.Enumerator.Binary as EB
 
 import Blaze.ByteString.Builder
-    (copyByteString, Builder, toByteString)
+    (copyByteString, Builder, toByteString, fromByteString)
 import Blaze.ByteString.Builder.Char8 (fromChar, fromShow)
 import Data.Monoid (mappend)
 
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (liftIO, MonadIO)
+import Control.Monad.Trans.Class (lift)
 import qualified Network.HTTP.Proxy.Timeout as T
 import Data.List (delete, foldl')
 import Control.Monad (forever, when)
@@ -86,6 +87,7 @@ import qualified Network.HTTP.Types as H
 import qualified Data.CaseInsensitive as CI
 import System.IO (hPutStrLn, stderr)
 import Numeric (readDec)
+import Data.Int (Int64)
 
 #if WINDOWS
 import Control.Concurrent (threadDelay)
@@ -237,20 +239,20 @@ serveConnection th tm onException port conn remoteHost' mgr = do
             outHdrs = [(n,v) | (n,v) <- requestHeaders req, n /= "Host"]
         liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
         let contentLength = if requestMethod req == "GET"
-              then 0
-              else readDecimal . B.unpack . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
+             then 0
+             else readDecimal . B.unpack . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
 
-        -- This should be fully lazy and interleaved reads from the client and
-        -- writes to the server. Need to test that this in fact the case.
-        -- If it doesn't, try wrapping the 'EB.take' in in 'EB.run_'.
-        postBody <- EB.take contentLength
         url <-
             (\u -> u { HE.method = requestMethod req,
                        HE.requestHeaders = outHdrs,
                        HE.rawBody = True,
-                       HE.requestBody = HE.RequestBodyLBS postBody })
-            <$> liftIO (HE.parseUrl (B.unpack urlStr))
-        close' <- liftIO $ E.run_ $ HE.http url (handleHttpReply close) mgr
+                       HE.requestBody = HE.RequestBodyEnum contentLength
+                                            $ joinE (enumIteratee contentLength lazyTake)
+                                            $ EL.map fromByteString
+                                            })
+                <$> lift (HE.parseUrl (B.unpack urlStr))
+
+        close' <- E.run_ $ HE.http url (handleHttpReply close) mgr
         if close'
             then return Nothing
             else serveConnection'
@@ -264,6 +266,45 @@ serveConnection th tm onException port conn remoteHost' mgr = do
                           ++ [("Connection", if close' then "Close" else "Keep-Alive")]
             mkHeaders (httpVersion req) status hdrs' $$ iterSocket th conn close
             return remoteClose
+
+
+enumIteratee :: MonadIO m => Int64
+             -> (Int64 -> Iteratee ByteString m ByteString)
+             -> Enumerator ByteString (Iteratee ByteString m) c
+enumIteratee maxlen iter = inner 0
+  where
+    blockLen = 10000
+    inner count (Continue k)
+        | count >= maxlen = k (Chunks [])
+        | count + blockLen <= maxlen = do
+                  bs <- lift $ iter blockLen
+                  if B.null bs
+                      then k EOF
+                      else k (Chunks [bs]) >>== inner (count + fromIntegral (B.length bs))
+        | otherwise = do
+                  bs <- lift $ iter (maxlen - count)
+                  if B.null bs
+                      then k EOF
+                      else k (Chunks [bs]) >>== inner (count + fromIntegral (B.length bs))
+    inner _ step = returnI step
+
+
+lazyTake :: Monad m => Int64 -> Iteratee ByteString m ByteString
+lazyTake n | n <= 0 = return B.empty
+lazyTake n = continue (loop id n) where
+	loop acc n' (Chunks []) = continue (loop acc n')
+	loop acc n' (Chunks (x:xs)) = iter where
+		len = fromIntegral (B.length x)
+
+		iter
+		    | len < n'  = continue (loop (acc . B.append x) (n' - len))
+		    | len == n' = yield (acc x) (Chunks xs)
+		    | otherwise =
+                 let (start, extra) = B.splitAt (fromIntegral n') x
+				in yield (acc start) (Chunks (extra:xs))
+	loop acc _ EOF = yield (acc B.empty) EOF
+
+--------------------------------------------------------------------------------
 
 failRequest :: T.Handle -> Socket -> Request -> ByteString -> ByteString -> E.Iteratee ByteString IO (Maybe (ThreadId, Socket))
 failRequest th conn req headerMsg bodyMsg = do
@@ -468,10 +509,11 @@ enumSocket th len sock =
 ------ The functions below are not warp-specific and could be split out into a
 --separate package.
 
-iterSocket :: T.Handle
+iterSocket :: MonadIO m
+           => T.Handle
            -> Socket
            -> Bool  -- ^ To close
-           -> E.Iteratee B.ByteString IO ()
+           -> E.Iteratee B.ByteString m ()
 iterSocket th sock toClose =
     E.continue step
   where
