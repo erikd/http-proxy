@@ -1,4 +1,6 @@
-A Haskell library for creating HTTP and HTTPS web proxies.
+A Haskell library for creating HTTP and HTTPS web proxies. Memory usage of the
+proxy scales with the number of simultaneous connections and should be
+independent of the size of either the POST request body or the response body.
 
 This library relies heavily on the following libraries:
 
@@ -21,14 +23,9 @@ Known Issues
 
  - Some URLs get mangled by the proxy.
 
- - For HTTP Post operations, the proxy will wait until it has received the whole
-   of the request body before it pushes it upstream. This is a problem that
-   needs to be fixed in by extending Wai.
 
 Required Features
 =================
-
- - Add a cabal file and release on Hackage.
 
  - A config hook to allow the request sent by the client to be modified before
    the proxy acts on it.
