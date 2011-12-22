@@ -28,12 +28,12 @@
 --
 
 module Network.HTTP.Proxy
-	( runProxy
-	, runProxySettings
+    ( runProxy
+    , runProxySettings
 
-	, Settings (..)
-	, defaultSettings
-	)
+    , Settings (..)
+    , defaultSettings
+    )
 where
 
 import Prelude hiding (catch, lines)
@@ -221,7 +221,7 @@ serveConnection th tm onException port conn remoteHost' mgr = do
             _ | requestMethod req == "CONNECT" ->
                 case B.split ':' (rawPathInfo req) of
                     [h, p] -> proxyConnect th tm onException conn h (readDecimal $ B.unpack p) req
-                    _	-> failRequest th conn req "Bad request" ("Bad request '" `mappend` rawPathInfo req `mappend` "'.")
+                    _      -> failRequest th conn req "Bad request" ("Bad request '" `mappend` rawPathInfo req `mappend` "'.")
             _ | otherwise ->
                 failRequest th conn req "Unknown request" ("Unknown request '" `mappend` rawPathInfo req `mappend` "'.")
 
@@ -247,7 +247,7 @@ serveConnection th tm onException port conn remoteHost' mgr = do
                        HE.requestHeaders = outHdrs,
                        HE.rawBody = True,
                        HE.requestBody = HE.RequestBodyEnum contentLength
-                                            $ joinE (enumIteratee contentLength lazyTake)
+                                            $ joinE (enumIteratee contentLength lazyTakeMax)
                                             $ EL.map fromByteString
                                             })
                 <$> lift (HE.parseUrl (B.unpack urlStr))
@@ -342,9 +342,9 @@ proxyConnect th tm onException conn host prt req = do
             Left errorMsg ->
                 failRequest th conn req errorMsg ("PROXY FAILURE\r\n" `mappend` errorMsg)
 
-connectTo :: HostName		-- Hostname
-	  -> PortID 		-- Port Identifier
-	  -> IO Socket		-- Connected Socket
+connectTo :: HostName   -- Hostname
+          -> PortID     -- Port Identifier
+          -> IO Socket  -- Connected Socket
 connectTo hostname (Service serv) = connect' hostname serv
 connectTo hostname (PortNumber port) = connect' hostname (show port)
 connectTo _ (UnixSocket _) = error "Cannot connect to a UnixSocket"
@@ -360,12 +360,12 @@ connect' host serv = do
   where
   tryToConnect addr =
     bracketOnError
-	(socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr))
-	sClose  -- only done if there's an error
-	(\sock -> do
-          connect sock (addrAddress addr)
-          return sock
- 	)
+    (socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr))
+    sClose  -- only done if there's an error
+    (\sock -> do
+        connect sock (addrAddress addr)
+        return sock
+        )
 
 -- Returns the first action from a list which does not throw an exception.
 -- If all the actions throw exceptions (and the list of actions is not empty),
@@ -564,7 +564,7 @@ defaultSettings = Settings
             Just x -> go x
             Nothing ->
                 when (go' $ fromException e)
-					$ hPutStrLn stderr $ show e
+                    $ hPutStrLn stderr $ show e
     , proxyTimeout = 30
     }
   where
