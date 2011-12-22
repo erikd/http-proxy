@@ -267,26 +267,30 @@ serveConnection th tm onException port conn remoteHost' mgr = do
             mkHeaders (httpVersion req) status hdrs' $$ iterSocket th conn close
             return remoteClose
 
-
+-- Create an Enumerator from an Iteratee.
+-- The first parameter is the number of bytes to be pulled from the Iteratee.
+-- The second is an Iteratee that can pull the data from the source in chunks.
+-- The return value is an Enumerator that operates inside the Iteratee monad.
 enumIteratee :: MonadIO m => Int64
              -> (Int64 -> Iteratee ByteString m ByteString)
              -> Enumerator ByteString (Iteratee ByteString m) c
 enumIteratee maxlen iter = inner 0
   where
-    blockLen = 10000
+    blockLen = 32768
     inner count (Continue k)
         | count >= maxlen = k (Chunks [])
         | count + blockLen <= maxlen = do
                   bs <- lift $ iter blockLen
                   if B.null bs
                       then k EOF
-                      else k (Chunks [bs]) >>== inner (count + fromIntegral (B.length bs))
+                      else k (Chunks [bs]) >>== inner (count + blength bs)
         | otherwise = do
                   bs <- lift $ iter (maxlen - count)
                   if B.null bs
                       then k EOF
-                      else k (Chunks [bs]) >>== inner (count + fromIntegral (B.length bs))
+                      else k (Chunks [bs]) >>== inner (count + blength bs)
     inner _ step = returnI step
+    blength = fromIntegral . B.length
 
 
 lazyTake :: Monad m => Int64 -> Iteratee ByteString m ByteString
