@@ -21,7 +21,10 @@ fail for some others. Work is underway to fix these issues.
 Known Issues
 ============
 
- - Some URLs get mangled by the proxy.
+ - Some URLs get mangled by the proxy. This is actually an issue in
+   http-enumerator. See:
+
+       https://github.com/snoyberg/http-enumerator/issues/48
 
 
 Required Features
