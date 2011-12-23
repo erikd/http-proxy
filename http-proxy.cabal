@@ -1,5 +1,5 @@
 Name:           http-proxy
-Version:        0.0.3
+Version:        0.0.4
 License:        BSD3
 License-file:   LICENSE
 Author:         Michael Snoyman, Stephen Blackheath, Erik de Castro Lopo
@@ -22,7 +22,7 @@ Description:
   .
   The Settings data type provided by the library allows the caller to supply
   a functions for exception reporting and request re-writing.  Eventually, this
-  capability will be expanded to allow options logging, disk caching etc.
+  capability will be expanded to allow optional logging, disk caching etc.
 
 flag network-bytestring
     Default: False
