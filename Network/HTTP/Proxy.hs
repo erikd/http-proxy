@@ -33,6 +33,7 @@ module Network.HTTP.Proxy
 
     , Settings (..)
     , defaultSettings
+    , Request (..)
     )
 where
 
@@ -152,6 +153,7 @@ type Port = Int
 runSettingsSocket :: Settings -> Socket -> IO ()
 runSettingsSocket set sock = do
     let onE = proxyOnException set
+        reqRM = proxyRequestModifier set
         port = proxyPort set
     tm <- T.initialize $ proxyTimeout set * 1000000
     mgr <- HE.newManager
@@ -159,7 +161,7 @@ runSettingsSocket set sock = do
         (conn, sa) <- accept sock
         _ <- forkIO $ do
             th <- T.registerKillThread tm
-            serveConnection th tm onE port conn sa mgr
+            serveConnection th tm onE reqRM port conn sa mgr
             T.cancel th
         return ()
 
@@ -196,10 +198,11 @@ mkHeaders ver s hrs =
 serveConnection :: T.Handle
                 -> T.Manager
                 -> (SomeException -> IO ())
+                -> (Request -> IO Request)
                 -> Port -> Socket -> SockAddr
                 -> HE.Manager
                 -> IO ()
-serveConnection th tm onException port conn remoteHost' mgr = do
+serveConnection th tm onException requestMod port conn remoteHost' mgr = do
       mExtraSocket <- E.run_ (fromClient $$ serveConnection')
           `finally` sCloseX conn
       case mExtraSocket of
@@ -217,7 +220,7 @@ serveConnection th tm onException port conn remoteHost' mgr = do
         --liftIO $ print $ requestHeaders req
         case req of
             _ | requestMethod req `elem` [ "GET", "POST" ] ->
-                proxyPlain req
+                liftIO (requestMod req) >>= proxyPlain
             _ | requestMethod req == "CONNECT" ->
                 case B.split ':' (rawPathInfo req) of
                     [h, p] -> proxyConnect th tm onException conn h (readDecimal $ B.unpack p) req
@@ -551,6 +554,7 @@ data Settings = Settings
     , proxyHost :: String -- ^ Host to bind to, or * for all. Default value: *
     , proxyOnException :: SomeException -> IO () -- ^ What to do with exceptions thrown by either the application or server. Default: ignore server-generated exceptions (see 'InvalidRequest') and print application-generated applications to stderr.
     , proxyTimeout :: Int -- ^ Timeout value in seconds. Default value: 30
+    , proxyRequestModifier :: Request -> IO Request -- ^ A function that allows the the request to be modified before being run. Default: 'return . id'.
     }
 
 -- | The default settings for the Proxy server. See the individual settings for
@@ -566,6 +570,7 @@ defaultSettings = Settings
                 when (go' $ fromException e)
                     $ hPutStrLn stderr $ show e
     , proxyTimeout = 30
+    , proxyRequestModifier = return . id
     }
   where
     go :: InvalidRequest -> IO ()
