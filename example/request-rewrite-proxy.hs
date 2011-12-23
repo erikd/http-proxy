@@ -5,16 +5,19 @@ import Network.HTTP.Proxy
 main :: IO ()
 main = runProxySettings $ defaultSettings
                 { proxyPort = 31081
-                , proxyRequestModifier = noFacebook
+                , proxyRequestModifier = secureGoogle
                 }
 
+-- We can modify the request so that instead of going to unsecured Google
+-- search page, people get redirected to the encrypted version.
 
-noFacebook :: Request -> IO Request
-noFacebook req
- | serverName req == "www.facebook.com" =
+secureGoogle :: Request -> IO Request
+secureGoogle req
+ | serverName req == "www.google.com" =
          return $ req
-                { serverName = "www.google.com"
-                , serverPort = 80
+                { isSecure = True
+                , serverName = "encrypted.google.com"
+                , serverPort = 443
                 , pathInfo = []
                 , queryString = []
                 , rawQueryString = ""
