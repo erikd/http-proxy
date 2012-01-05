@@ -253,7 +253,7 @@ serveConnection th tm onException requestMod port conn remoteHost' mgr = do
                                             $ joinE (enumIteratee contentLength lazyTakeMax)
                                             $ EL.map fromByteString
                                             })
-                <$> lift (HE.parseUrl (B.unpack urlStr))
+                <$> lift (HE.semiParseUrl (B.unpack urlStr))
 
         close' <- E.run_ $ HE.http url (handleHttpReply close) mgr
         if close'
