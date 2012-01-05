@@ -32,7 +32,7 @@ Library
                    , bytestring                    >= 0.9.1.4  && < 0.10
                    , wai                           >= 0.4      && < 0.5
                    , enumerator                    >= 0.4.8    && < 0.5
-                   , http-enumerator               >= 0.7      && < 0.8
+                   , http-enumerator               >= 0.7.2.2  && < 0.8
                    , transformers                  >= 0.2.2    && < 0.3
                    , blaze-builder                 >= 0.2.1.4  && < 0.4
                    , http-types                    >= 0.6      && < 0.7
