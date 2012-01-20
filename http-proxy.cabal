@@ -5,6 +5,7 @@ License-file:   LICENSE
 Author:         Michael Snoyman, Stephen Blackheath, Erik de Castro Lopo
 Maintainer:     erikd@mega-nerd.com
 Homepage:       https://github.com/erikd/http-proxy
+Bug reports:    https://github.com/erikd/http-proxy/issues
 Category:       Web
 Build-Type:     Simple
 Cabal-Version:  >=1.6
