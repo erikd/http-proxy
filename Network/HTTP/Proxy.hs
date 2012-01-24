@@ -77,7 +77,7 @@ import qualified Data.Enumerator.Binary as EB
 import Blaze.ByteString.Builder
     (copyByteString, Builder, toByteString, fromByteString)
 import Blaze.ByteString.Builder.Char8 (fromChar, fromShow)
-import Data.Monoid (mappend)
+import Data.Monoid (mappend, mempty)
 
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Trans.Class (lift)
@@ -435,6 +435,8 @@ parseRequest' port (firstLine:otherLines) remoteHost' = do
                 , requestHeaders = heads
                 , isSecure = False
                 , remoteHost = remoteHost'
+                , requestBody = mepmty
+                , vault = mempty
                 }
 
 parseFirst :: ByteString
