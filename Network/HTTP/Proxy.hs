@@ -66,8 +66,7 @@ import Control.Exception
     , bracketOnError, IOException, throw
     )
 import Control.Concurrent (forkIO, killThread)
-import qualified Data.Char as C
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import qualified Network.HTTP.Conduit as HC
 
 import Data.Typeable (Typeable)
@@ -94,7 +93,7 @@ import Control.Monad (forever, when, void)
 import qualified Network.HTTP.Types as H
 import qualified Data.CaseInsensitive as CI
 import System.IO (hPutStrLn, stderr)
-import Numeric (readDec)
+import Network.HTTP.Proxy.ReadInt (readInt64)
 
 #if WINDOWS
 import Control.Concurrent (threadDelay)
@@ -160,7 +159,7 @@ bindPort p s = do
         addr = if null addrs' then head addrs else head addrs'
     bracketOnError
         (Network.Socket.socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr))
-        (sClose)
+        sClose
         (\sock -> do
             setSocketOption sock ReuseAddr 1
             bindSocket sock (addrAddress addr)
@@ -227,7 +226,7 @@ serveConnection :: Settings
                 -> Connection -> SockAddr
                 -> HC.Manager
                 -> IO ()
-serveConnection settings th tm onException port conn remoteHost' mgr = do
+serveConnection settings th tm onException port conn remoteHost' mgr =
     catch
         (finally
           (runResourceT serveConnection')
@@ -249,11 +248,11 @@ serveConnection settings th tm onException port conn remoteHost' mgr = do
                         >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
             _ | requestMethod req == "CONNECT" ->
                 case B.split ':' (rawPathInfo req) of
-                    [h, p] -> proxyConnect th tm conn h (readInt $ B.unpack p) req
+                    [h, p] -> proxyConnect th tm conn h (readInt p) req
                                 >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
                     _      -> failRequest th conn req "Bad request" ("Bad request '" `mappend` rawPathInfo req `mappend` "'.")
                                 >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
-            _ | otherwise ->
+            _ ->
                 failRequest th conn req "Unknown request" ("Unknown request '" `mappend` rawPathInfo req `mappend` "'.")
                                 >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
 
@@ -287,18 +286,16 @@ parseRequest' :: Port
 parseRequest' _ [] _ _ = throwIO $ NotEnoughLines []
 parseRequest' port (firstLine:otherLines) remoteHost' src = do
     (method, rpath', gets, httpversion) <- parseFirst firstLine
-    let (host',rpath) =
-            if S.null rpath'
-                then ("","/")
-                else if "http://" `S.isPrefixOf` rpath'
-                         then S.breakByte 47 $ S.drop 7 rpath' -- '/'
-                         else ("", rpath')
+    let (host',rpath)
+            | S.null rpath' = ("", "/")
+            | "http://" `S.isPrefixOf` rpath' = S.breakByte 47 $ S.drop 7 rpath'
+            | otherwise = ("", rpath')
     let heads = map parseHeaderNoAttr otherLines
     let host = fromMaybe host' $ lookup "host" heads
     let len =
             case lookup "content-length" heads of
                 Nothing -> 0
-                Just bs -> fromIntegral $ B.foldl' (\i c -> i * 10 + C.digitToInt c) 0 $ B.takeWhile C.isDigit bs
+                Just bs -> readInt bs
     let serverName' = takeUntil 58 host -- ':'
     -- FIXME isolate takes an Integer instead of Int or Int64. If this is a
     -- performance penalty, we may need our own version.
@@ -398,7 +395,7 @@ isChunked :: H.HttpVersion -> Bool
 isChunked = (==) H.http11
 
 hasBody :: H.Status -> Request -> Bool
-hasBody s req = s /= (H.Status 204 "") && s /= H.status304 &&
+hasBody s req = s /= H.Status 204 "" && s /= H.status304 &&
                 H.statusCode s >= 200 && requestMethod req /= "HEAD"
 
 sendResponse :: T.Handle
@@ -410,7 +407,7 @@ sendResponse th req conn r = sendResponse' r
     isChunked' = isChunked version
     needsChunked hs = isChunked' && not (hasLength hs)
     isKeepAlive hs = isPersist && (isChunked' || hasLength hs)
-    hasLength hs = lookup "content-length" hs /= Nothing
+    hasLength hs = isJust $ lookup "content-length" hs
 
     sendResponse' :: Response -> ResourceT IO Bool
     sendResponse' ResponseFile{} = error "Proxy cannot send a file."
@@ -432,10 +429,10 @@ sendResponse th req conn r = sendResponse' r
         headers' = headers version s hs
         needsChunked' = needsChunked hs
         body = if needsChunked'
-                  then (headers' needsChunked')
+                  then headers' needsChunked'
                        `mappend` chunkedTransferEncoding b
                        `mappend` chunkedTransferTerminator
-                  else (headers' False) `mappend` b
+                  else headers' False `mappend` b
 
     sendResponse' (ResponseSource s hs body) =
         response
@@ -458,7 +455,7 @@ sendResponse th req conn r = sendResponse' r
                 return $ isKeepAlive hs
         needsChunked' = needsChunked hs
         chunk :: C.Conduit Builder IO Builder
-        chunk = C.Conduit $ return $ C.PreparedConduit
+        chunk = C.Conduit $ return C.PreparedConduit
             { C.conduitPush = push
             , C.conduitClose = close
             }
@@ -490,7 +487,7 @@ connSource Connection { connRecv = recv } th = C.PreparedSource
 
 -- | Use 'connSendAll' to send this data while respecting timeout rules.
 connSink :: Connection -> T.Handle -> C.Sink B.ByteString IO ()
-connSink Connection { connSendAll = send } th = C.Sink $ return $ C.SinkData
+connSink Connection { connSendAll = send } th = C.Sink $ return C.SinkData
     { C.sinkPush = push
     , C.sinkClose = close
     }
@@ -500,7 +497,7 @@ connSink Connection { connSendAll = send } th = C.Sink $ return $ C.SinkData
         liftIO $ T.resume th
         liftIO $ send x
         liftIO $ T.pause th
-        return $ C.Processing
+        return C.Processing
     -- We pause timeouts before passing control back to user code. This ensures
     -- that a timeout will only ever be executed when Warp is in control. We
     -- also make sure to resume the timeout after the completion of user code
@@ -608,6 +605,11 @@ checkCR bs pos =
         else pos
 {-# INLINE checkCR #-}
 
+readInt :: Integral a => ByteString -> a
+readInt bs = fromIntegral $ readInt64 bs
+{-# INLINE readInt #-}
+
+
 serverHeader :: H.RequestHeaders -> H.RequestHeaders
 serverHeader hdrs = case lookup key hdrs of
     Nothing  -> server : hdrs
@@ -617,15 +619,6 @@ serverHeader hdrs = case lookup key hdrs of
     ver = B.pack "Proxy/0.0"
     server = (key, ver)
     servers svr = (key, S.concat [svr, " ", ver])
-
-
-readInt :: Num a => String -> a
-readInt s =
-    case readDec s of
-      [] -> 0
-      (x, _):_ -> x
-
-
 
 --------------------------------------------------------------------------------
 
@@ -644,7 +637,7 @@ proxyPlain th conn mgr req = do
         liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
         let contentLength = if requestMethod req == "GET"
              then 0
-             else readInt . B.unpack . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
+             else readInt . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
 
         url <-
             (\u -> u { HC.method = requestMethod req,
@@ -691,7 +684,7 @@ proxyConnect th tm conn host prt req = do
         case eConn of
             Right uconn -> do
                 fromUpstream <- C.bufferSource $ C.Source $ return $ connSource uconn th
-                liftIO $ do
+                liftIO $
                     connSendMany conn $ L.toChunks $ toLazyByteString
                                       $ headers (httpVersion req) H.statusOK [] False
                 void $ with (forkIO $ do
