@@ -1,5 +1,5 @@
 Name:           http-proxy
-Version:        0.0.5
+Version:        0.0.6
 License:        BSD3
 License-file:   LICENSE
 Author:         Michael Snoyman, Stephen Blackheath, Erik de Castro Lopo
@@ -40,6 +40,7 @@ Library
                    , case-insensitive              >= 0.4      && < 0.5
                    , lifted-base                   >= 0.1      && < 0.2
                    , blaze-builder-conduit         >= 0.0      && < 0.1
+                   , ghc-prim
   if flag(network-bytestring)
       build-depends: network               >= 2.2.1.5 && < 2.2.3
                    , network-bytestring    >= 0.1.3   && < 0.1.4
@@ -47,6 +48,7 @@ Library
       build-depends: network               >= 2.3     && < 2.4
   Exposed-modules:   Network.HTTP.Proxy
   Other-modules:     Network.HTTP.Proxy.Timeout
+                     Network.HTTP.Proxy.ReadInt
 
   ghc-options:       -Wall
   if os(windows)
