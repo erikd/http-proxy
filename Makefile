@@ -16,5 +16,5 @@ proxy : example/proxy.hs $(LIBSRC)
 request-rewrite-proxy : example/request-rewrite-proxy.hs
 	$(GHC) --make $< -o $@
 
-proxy-test : test/proxy-test.hs
+proxy-test : test/proxy-test.hs test/TestServer.hs
 	$(GHC) --make -i:test $< -o $@
