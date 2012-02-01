@@ -2,3 +2,4 @@ dist
 proxy
 request-rewrite-proxy
 spellTmp.bak
+test-proxy

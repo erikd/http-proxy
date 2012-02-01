@@ -1,4 +1,4 @@
-TARGETS = proxy request-rewrite-proxy
+TARGETS = proxy request-rewrite-proxy proxy-test
 
 GHC = ghc -Wall -fwarn-missing-signatures -fwarn-tabs -i:src
 
@@ -15,3 +15,6 @@ proxy : example/proxy.hs $(LIBSRC)
 
 request-rewrite-proxy : example/request-rewrite-proxy.hs
 	$(GHC) --make $< -o $@
+
+proxy-test : test/proxy-test.hs
+	$(GHC) --make -i:test $< -o $@
