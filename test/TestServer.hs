@@ -19,7 +19,9 @@ import Network.Wai.Handler.Warp
 import Data.ByteString                    (ByteString)
 
 import qualified Data.ByteString          as BS
-import qualified Data.CaseInsensitive     as CI
+
+
+import Util (headerShow)
 
 
 runTestServer :: Int -> IO ()
@@ -31,28 +33,20 @@ runTestServer port =
 serverApp :: Request -> ResourceT IO Response
 serverApp req = do
     let text = BS.concat
-            [ "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0 Transitional//EN\">\n"
-            , "<html>\n"
-            , "<head>\n<title>warp-simple.hs</title>\n</head>\n"
-            , "<body>\n"
-            , "<pre>\n"
-            , "The response follows:\n"
-            , "  Method          : " , requestMethod req , "\n"
+            [ "  Method          : " , requestMethod req , "\n"
             , "  HTTP Version    : " , fromString (show (httpVersion req)) , "\n"
             , "  Path Info       : " , rawPathInfo req , "\n"
             , "  Query String    : " , rawQueryString req , "\n"
             , "  Server Name     : " , serverName req , "\n"
             , "  Server Port     : " , fromString (show (serverPort req)), "\n"
             , "  Secure (SSL)    : " , fromString (show (isSecure req)), "\n"
-
             , "  Remote Host     : " , fromString (show (remoteHost req)), "\n"
             , "  Request Headers :\n\n"
-            , BS.intercalate "\n" $ map headerShow (requestHeaders req), "\n\n"
-            , "</pre>\n"
-            , "</body></html>\n"
+            , headerShow (requestHeaders req)
+            , "\n\n"
             ]
     let respHeaders =
-            [ headerContentType "text/html"
+            [ headerContentType "text/plain"
             , headerContentLength $ fromString $ show $ BS.length text
             ]
     return $ responseBS statusOK respHeaders text
@@ -64,7 +58,4 @@ serverApp req = do
 responseBS :: Status -> ResponseHeaders -> ByteString -> Response
 responseBS s h = ResponseBuilder s h . fromByteString
 
-
-headerShow :: Header -> ByteString
-headerShow (f, v) = BS.concat [ "      ", CI.original f , ": " , v ]
 
