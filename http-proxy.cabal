@@ -31,7 +31,7 @@ flag network-bytestring
 Library
   Build-Depends:     base                          >= 3        && < 5
                    , bytestring                    >= 0.9.1.4  && < 0.10
-                   , wai                           >= 1.0      && < 1.1
+                   , wai                           >= 1.1      && < 1.2
                    , conduit
                    , http-conduit                  >= 1.2      && < 1.3
                    , transformers                  >= 0.2.2    && < 0.3
@@ -39,7 +39,7 @@ Library
                    , http-types                    >= 0.6      && < 0.7
                    , case-insensitive              >= 0.4      && < 0.5
                    , lifted-base                   >= 0.1      && < 0.2
-                   , blaze-builder-conduit         >= 0.0      && < 0.1
+                   , blaze-builder-conduit         >= 0.2      && < 0.3
                    , ghc-prim
   if flag(network-bytestring)
       build-depends: network               >= 2.2.1.5 && < 2.2.3
