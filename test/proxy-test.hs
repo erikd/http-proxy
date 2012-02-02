@@ -11,12 +11,11 @@ import Control.Monad.Trans.Resource
 import Network.HTTP.Proxy
 
 import Control.Concurrent (forkIO, killThread)
-import Control.Monad (when)
+import Control.Monad (forM_, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString (ByteString)
 import Data.Conduit (($$))
-import System.Exit (exitFailure)
 
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
@@ -42,25 +41,22 @@ main = runResourceT $ do
 
 --------------------------------------------------------------------------------
 
-data Result = Result
-    { status    :: Int
-    , headers   :: ByteString
-    , body      :: ByteString
-    }
-    deriving Eq
+data Result = Result Int [HT.Header] ByteString
+
 
 printResult :: Result -> IO ()
-printResult Result{..} = do
+printResult (Result status headers body) = do
     putStrLn $ "Status : " ++ show status
     putStrLn "Headers :"
-    BS.putStr $ headers
+    BS.putStr $ headerShow headers
     putStrLn "Body :"
     BS.putStrLn body
 
 
 runTests :: ResourceT IO ()
-runTests =
+runTests = do
     testUrl $ "http://localhost:" ++ show testServerPort ++ "/"
+    testUrl $ "http://www.mega-nerd.com/index.html"
 
 
 testUrl :: String -> ResourceT IO ()
@@ -68,16 +64,30 @@ testUrl url = do
     request <- lift $ HC.parseUrl url
     direct <- httpRun request
     proxy <- httpRun $ HC.addProxy "localhost" testProxyPort request
-    when (direct /= proxy) $ liftIO $ do
+    when False $ liftIO $ do
         printResult direct
-        putStrLn "----------------------------------------------"
         printResult proxy
-        putStrLn "Test failed."
-        exitFailure
+    compareResult direct proxy
 
 
+-- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
+-- Response contains a Source which was need to read to generate our result.
 httpRun :: HC.Request IO -> ResourceT IO Result
 httpRun req = liftIO $ HC.withManager $ \mgr -> do
     HC.Response st hdrs bdy <- HC.http req mgr
-    bodyText <- bdy $$ BL.take 2048
-    return $ Result (HT.statusCode st) (headerShow hdrs) $ BS.concat $ LBS.toChunks bodyText
+    bodyText <- bdy $$ BL.take 8192
+    return $ Result (HT.statusCode st) hdrs $ BS.concat $ LBS.toChunks bodyText
+
+
+-- | Compare results and error out if they're different.
+compareResult :: Result -> Result -> ResourceT IO ()
+compareResult (Result sa ha ba) (Result sb hb bb) = liftIO $ do
+    assert (sa == sb) $ "HTTP status codes don't match : " ++ show sa ++ " /= " ++ show sb
+    forM_ [ "server", "content-type", "content-length" ] $ \v ->
+        let xa = lookup v ha
+            xb = lookup v hb
+        in assert (xa == xb) $ "Header field '" ++ show v ++ "' doesn't match : '" ++ show xa ++ "' /= '" ++ show xb
+    assert (ba == bb) $ "HTTP response bodies are different :\n" ++ BS.unpack ba ++ "\n-----------\n" ++ BS.unpack bb
+  where
+    assert :: Bool -> String -> IO ()
+    assert b msg = when (not b) $ error msg
