@@ -161,10 +161,9 @@ bindPort p s = do
     -- handle both IPv4 and IPv6 if v6only is false.
     let addrs' = filter (\x -> addrFamily x == AF_INET6) addrs ++ filter (\x -> addrFamily x /= AF_INET6) addrs
 
-        tryAddrs (addr1:rest@(_:_)) = putStrLn ("trying: " ++ show addr1) >>
-                                      catch
+        tryAddrs (addr1:rest@(_:_)) = catch
                                       (theBody addr1)
-                                      (\(_ :: IOException) -> putStrLn "retrying ... " >> tryAddrs rest)
+                                      (\(_ :: IOException) -> tryAddrs rest)
         tryAddrs (addr1:[])         = theBody addr1
         tryAddrs _                  = error "bindPort: addrs is empty"
         theBody addr =
@@ -252,7 +251,7 @@ serveConnection settings th tm onException port conn remoteHost' mgr =
         serveConnection'' fromClient
 
     serveConnection'' fromClient = do
-        req <- parseRequest port remoteHost' fromClient
+        req <- parseRequest conn port remoteHost' fromClient
         case req of
             _ | requestMethod req `elem` [ "GET", "POST" ] -> do
                     case lookup "host" (requestHeaders req) of
@@ -276,12 +275,12 @@ serveConnection settings th tm onException port conn remoteHost' mgr =
                 failRequest th conn req "Unknown request" ("Unknown request '" `mappend` rawPathInfo req `mappend` "'.")
                                 >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
 
-parseRequest :: Port -> SockAddr
+parseRequest :: Connection -> Port -> SockAddr
              -> C.BufferedSource IO S.ByteString
              -> ResourceT IO Request
-parseRequest port remoteHost' src = do
+parseRequest conn port remoteHost' src = do
     headers' <- src C.$$ takeHeaders
-    parseRequest' port headers' remoteHost' src
+    parseRequest' conn port headers' remoteHost' src
 
 -- FIXME come up with good values here
 bytesPerRead, maxTotalHeaderLength :: Int
@@ -297,28 +296,43 @@ data InvalidRequest =
     deriving (Show, Typeable, Eq)
 instance Exception InvalidRequest
 
+handleExpect :: Connection
+             -> H.HttpVersion
+             -> ([H.Header] -> [H.Header])
+             -> [H.Header]
+             -> IO [H.Header]
+handleExpect _ _ front [] = return $ front []
+handleExpect conn hv front (("expect", "100-continue"):rest) = do
+    connSendAll conn $
+        if hv == H.http11
+            then "HTTP/1.1 100 Continue\r\n\r\n"
+            else "HTTP/1.0 100 Continue\r\n\r\n"
+    return $ front rest
+handleExpect conn hv front (x:xs) = handleExpect conn hv (front . (x:)) xs
+
 -- | Parse a set of header lines and body into a 'Request'.
-parseRequest' :: Port
+parseRequest' :: Connection
+              -> Port
               -> [ByteString]
               -> SockAddr
               -> C.BufferedSource IO S.ByteString
               -> ResourceT IO Request
-parseRequest' _ [] _ _ = throwIO $ NotEnoughLines []
-parseRequest' port (firstLine:otherLines) remoteHost' src = do
+parseRequest' _ _ [] _ _ = throwIO $ NotEnoughLines []
+parseRequest' conn port (firstLine:otherLines) remoteHost' src = do
     (method, rpath', gets, httpversion) <- parseFirst firstLine
     let (host',rpath)
             | S.null rpath' = ("", "/")
             | "http://" `S.isPrefixOf` rpath' = S.breakByte 47 $ S.drop 7 rpath'
             | otherwise = ("", rpath')
-    let heads = map parseHeaderNoAttr otherLines
+    heads <- liftIO
+           $ handleExpect conn httpversion id
+             (map parseHeaderNoAttr otherLines)
     let host = fromMaybe host' $ lookup "host" heads
     let len0 =
             case lookup "content-length" heads of
                 Nothing -> 0
                 Just bs -> readInt bs
     let serverName' = takeUntil 58 host -- ':'
-    -- FIXME isolate takes an Integer instead of Int or Int64. If this is a
-    -- performance penalty, we may need our own version.
     rbody <-
         if len0 == 0
             then return mempty
@@ -370,7 +384,6 @@ parseRequest' port (firstLine:otherLines) remoteHost' src = do
                         , C.sourceClose = return ()
                         }
                 return $ wrap $ src C.$= isolate
-
     return Request
             { requestMethod = method
             , httpVersion = httpversion
