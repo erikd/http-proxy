@@ -50,7 +50,7 @@ Library
   Other-modules:     Network.HTTP.Proxy.Timeout
                      Network.HTTP.Proxy.ReadInt
 
-  ghc-options:       -Wall
+  ghc-options:       -Wall -fwarn-tabs
   if os(windows)
       Cpp-options: -DWINDOWS
 
