@@ -253,12 +253,19 @@ serveConnection settings th tm onException port conn remoteHost' mgr =
 
     serveConnection'' fromClient = do
         req <- parseRequest port remoteHost' fromClient
-        --liftIO $ print $ requestHeaders req
         case req of
-            _ | requestMethod req `elem` [ "GET", "POST" ] ->
-                liftIO (proxyRequestModifier settings req)
-                        >>= proxyPlain th conn mgr
-                        >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
+            _ | requestMethod req `elem` [ "GET", "POST" ] -> do
+                    case lookup "host" (requestHeaders req) of
+                        Nothing -> failRequest th conn req "Bad proxy request" ("Request '" `mappend` rawPathInfo req `mappend` "'.")
+                                        >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
+                        Just s -> do
+                                let (hs, ps) = case S.split 58 s of -- ':'
+                                        [h] -> (h, if isSecure req then 443 else 80)
+                                        [h, p] -> (h, readInt p)
+                                        _ -> (serverName req, serverPort req)
+                                modReq <- liftIO $ proxyRequestModifier settings req { serverName = hs, serverPort = ps }
+                                proxyPlain th conn mgr modReq
+                                        >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
             _ | requestMethod req == "CONNECT" ->
                 case B.split ':' (rawPathInfo req) of
                     [h, p] -> proxyConnect th tm conn h (readInt p) req
@@ -723,7 +730,12 @@ serverHeader hdrs = case lookup key hdrs of
 
 proxyPlain :: T.Handle -> Connection -> HC.Manager -> Request -> ResourceT IO Bool
 proxyPlain th conn mgr req = do
-        let urlStr = "http://" `mappend` serverName req
+        let portStr = case (serverPort req, isSecure req) of
+                           (80, False) -> mempty
+                           (443, True) -> mempty
+                           (n, _) -> fromString (":" ++ show n)
+            urlStr = "http://" `mappend` serverName req
+                               `mappend` portStr
                                `mappend` rawPathInfo req
                                `mappend` rawQueryString req
             close =
