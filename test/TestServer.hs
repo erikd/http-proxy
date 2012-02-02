@@ -40,7 +40,6 @@ serverApp req = do
             , "  Server Name     : " , serverName req , "\n"
             , "  Server Port     : " , fromString (show (serverPort req)), "\n"
             , "  Secure (SSL)    : " , fromString (show (isSecure req)), "\n"
-            , "  Remote Host     : " , fromString (show (remoteHost req)), "\n"
             , "  Request Headers :\n\n"
             , headerShow (requestHeaders req)
             , "\n\n"
