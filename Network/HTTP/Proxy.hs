@@ -73,14 +73,13 @@ import Data.Typeable (Typeable)
 
 import Control.Monad.Trans.Resource (ResourceT, runResourceT, with)
 import qualified Data.Conduit as C
-import qualified Data.Conduit.Binary as CB
 import qualified Data.Conduit.List as CL
 import Data.Conduit.Blaze (builderToByteString)
 import Control.Exception.Lifted (throwIO)
 import Blaze.ByteString.Builder.HTTP
     (chunkedTransferEncoding, chunkedTransferTerminator)
 import Blaze.ByteString.Builder
-    (copyByteString, Builder, toLazyByteString, toByteStringIO)
+    (copyByteString, Builder, toLazyByteString, toByteStringIO, flush)
 import Blaze.ByteString.Builder.Char8 (fromChar, fromShow)
 import Data.Monoid (mappend, mempty)
 
@@ -94,6 +93,8 @@ import qualified Network.HTTP.Types as H
 import qualified Data.CaseInsensitive as CI
 import System.IO (hPutStrLn, stderr)
 import Network.HTTP.Proxy.ReadInt (readInt64)
+import qualified Data.IORef as I
+import Data.String (IsString (..))
 
 #if WINDOWS
 import Control.Concurrent (threadDelay)
@@ -144,28 +145,40 @@ socketConnection s = Connection
     }
 
 
-bindPort :: Int -> String -> IO Socket
+bindPort :: Int -> HostPreference -> IO Socket
 bindPort p s = do
     let hints = defaultHints { addrFlags = [AI_PASSIVE
                                          , AI_NUMERICSERV
                                          , AI_NUMERICHOST]
                              , addrSocketType = Stream }
-        host = if s == "*" then Nothing else Just s
+        host =
+            case s of
+                Host s' -> Just s'
+                _ -> Nothing
         port = Just . show $ p
     addrs <- getAddrInfo (Just hints) host port
     -- Choose an IPv6 socket if exists.  This ensures the socket can
     -- handle both IPv4 and IPv6 if v6only is false.
-    let addrs' = filter (\x -> addrFamily x == AF_INET6) addrs
-        addr = if null addrs' then head addrs else head addrs'
-    bracketOnError
-        (Network.Socket.socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr))
-        sClose
-        (\sock -> do
-            setSocketOption sock ReuseAddr 1
-            bindSocket sock (addrAddress addr)
-            listen sock maxListenQueue
-            return sock
-        )
+    let addrs' = filter (\x -> addrFamily x == AF_INET6) addrs ++ filter (\x -> addrFamily x /= AF_INET6) addrs
+
+        tryAddrs (addr1:rest@(_:_)) = putStrLn ("trying: " ++ show addr1) >>
+                                      catch
+                                      (theBody addr1)
+                                      (\(_ :: IOException) -> putStrLn "retrying ... " >> tryAddrs rest)
+        tryAddrs (addr1:[])         = theBody addr1
+        tryAddrs _                  = error "bindPort: addrs is empty"
+        theBody addr =
+          bracketOnError
+          (Network.Socket.socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr))
+          sClose
+          (\sock -> do
+              putStrLn $ show addr ++ " out of " ++ show addrs
+              setSocketOption sock ReuseAddr 1
+              bindSocket sock (addrAddress addr)
+              listen sock maxListenQueue
+              return sock
+          )
+    tryAddrs addrs'
 
 -- | Run a HTTP and HTTPS proxy server on the specified port. This calls
 -- 'runProxySettings' with 'defaultSettings'.
@@ -235,7 +248,7 @@ serveConnection settings th tm onException port conn remoteHost' mgr =
   where
     serveConnection' :: ResourceT IO ()
     serveConnection' = do
-        fromClient <- C.bufferSource $ C.Source $ return $ connSource conn th
+        fromClient <- C.bufferSource $ connSource conn th
         serveConnection'' fromClient
 
     serveConnection'' fromClient = do
@@ -292,17 +305,65 @@ parseRequest' port (firstLine:otherLines) remoteHost' src = do
             | otherwise = ("", rpath')
     let heads = map parseHeaderNoAttr otherLines
     let host = fromMaybe host' $ lookup "host" heads
-    let len =
+    let len0 =
             case lookup "content-length" heads of
                 Nothing -> 0
                 Just bs -> readInt bs
     let serverName' = takeUntil 58 host -- ':'
     -- FIXME isolate takes an Integer instead of Int or Int64. If this is a
     -- performance penalty, we may need our own version.
-    rbody <- C.prepareSource $
-        if len == 0
-            then mempty
-            else src C.$= CB.isolate len
+    rbody <-
+        if len0 == 0
+            then return mempty
+            else do
+                -- We can't use the standard isolate, as its counter is not
+                -- kept in a mutable variable.
+                lenRef <- liftIO $ I.newIORef len0
+                let isolate = C.Conduit push close
+                    push bs = do
+                        len <- liftIO $ I.readIORef lenRef
+                        let (a, b) = S.splitAt len bs
+                            len' = len - S.length a
+                        liftIO $ I.writeIORef lenRef len'
+                        return $ if len' == 0
+                            then C.Finished (if S.null b then Nothing else Just b) (if S.null a then [] else [a])
+                            else C.Producing isolate [a]
+                    close = return []
+
+                    -- Make sure that we don't connect to the source after the
+                    -- isolate conduit closes.
+                    --
+                    -- Here's the issue: we fuse our buffered request body with
+                    -- an isolate conduit which ensures no more than X bytes
+                    -- are read. Suppose we read all X bytes, and then we call
+                    -- requestBody again. What happens?
+                    --
+                    -- Previously, we would try to read one more chunk from the
+                    -- buffered source. This is inherent to conduit: we
+                    -- wouldn't know that the isolate Conduit isn't accepting
+                    -- more data until after we've pushed some data to it. This
+                    -- results in hanging, since there's no data available on
+                    -- the wire.
+                    --
+                    -- Instead, we add a wrapper that checks if the request
+                    -- body has already been depleted before making that first
+                    -- pull.
+                    --
+                    -- Possible optimization: do away with the Conduit
+                    -- entirely. However, this may be less efficient overall,
+                    -- as we'd now have to check the BufferedSource status on
+                    -- each call. Worth looking into.
+
+                    wrap src' = C.Source
+                        { C.sourcePull = do
+                            len <- liftIO $ I.readIORef lenRef
+                            if len <= 0
+                                then return C.Closed
+                                else C.sourcePull src'
+                        , C.sourceClose = return ()
+                        }
+                return $ wrap $ src C.$= isolate
+
     return Request
             { requestMethod = method
             , httpVersion = httpversion
@@ -315,7 +376,7 @@ parseRequest' port (firstLine:otherLines) remoteHost' src = do
             , requestHeaders = heads
             , isSecure = False
             , remoteHost = remoteHost'
-            , requestBody = C.Source $ return rbody
+            , requestBody = rbody
             , vault = mempty
             }
 
@@ -434,9 +495,12 @@ sendResponse th req conn r = sendResponse' r
                        `mappend` chunkedTransferTerminator
                   else headers' False `mappend` b
 
-    sendResponse' (ResponseSource s hs body) =
+    sendResponse' (ResponseSource s hs bodyFlush) =
         response
       where
+        body = fmap (\x -> case x of
+                        C.Flush -> flush
+                        C.Chunk builder -> builder) bodyFlush
         headers' = headers version s hs
         -- FIXME perhaps alloca a buffer per thread and reuse that in all
         -- functions below. Should lessen greatly the GC burden (I hope)
@@ -455,12 +519,13 @@ sendResponse th req conn r = sendResponse' r
                 return $ isKeepAlive hs
         needsChunked' = needsChunked hs
         chunk :: C.Conduit Builder IO Builder
-        chunk = C.Conduit $ return C.PreparedConduit
+        chunk = C.Conduit
             { C.conduitPush = push
             , C.conduitClose = close
             }
 
-        push x = return $ C.Producing [chunkedTransferEncoding x]
+        conduit = C.Conduit push close
+        push x = return $ C.Producing conduit [chunkedTransferEncoding x]
         close = return [chunkedTransferTerminator]
 
 parseHeaderNoAttr :: ByteString -> H.Header
@@ -473,31 +538,33 @@ parseHeaderNoAttr s =
                    else rest
      in (CI.mk k, rest')
 
-connSource :: Connection -> T.Handle -> C.PreparedSource IO ByteString
-connSource Connection { connRecv = recv } th = C.PreparedSource
-    { C.sourcePull = do
-        bs <- liftIO recv
-        if S.null bs
-            then return C.Closed
-            else do
-                when (S.length bs >= 2048) $ liftIO $ T.tickle th
-                return (C.Open bs)
-    , C.sourceClose = return ()
-    }
+connSource :: Connection -> T.Handle -> C.Source IO ByteString
+connSource Connection { connRecv = recv } th =
+    src
+  where
+    src = C.Source
+        { C.sourcePull = do
+            bs <- liftIO recv
+            if S.null bs
+                then return C.Closed
+                else do
+                    when (S.length bs >= 2048) $ liftIO $ T.tickle th
+                    return (C.Open src bs)
+        , C.sourceClose = return ()
+        }
 
 -- | Use 'connSendAll' to send this data while respecting timeout rules.
 connSink :: Connection -> T.Handle -> C.Sink B.ByteString IO ()
-connSink Connection { connSendAll = send } th = C.Sink $ return C.SinkData
-    { C.sinkPush = push
-    , C.sinkClose = close
-    }
+connSink Connection { connSendAll = send } th =
+    C.SinkData push close
   where
     close = liftIO (T.resume th)
     push x = do
-        liftIO $ T.resume th
-        liftIO $ send x
-        liftIO $ T.pause th
-        return C.Processing
+        liftIO $ do
+            T.resume th
+            send x
+            T.pause th
+        return (C.Processing push close)
     -- We pause timeouts before passing control back to user code. This ensures
     -- that a timeout will only ever be executed when Warp is in control. We
     -- also make sure to resume the timeout after the completion of user code
@@ -515,11 +582,43 @@ connSink Connection { connSendAll = send } th = C.Sink $ return C.SinkData
 -- > defaultSettings { proxyPort = 3128 }
 data Settings = Settings
     { proxyPort :: Int -- ^ Port to listen on. Default value: 3100
-    , proxyHost :: String -- ^ Host to bind to, or * for all. Default value: *
+    , proxyHost :: HostPreference -- ^ Default value: HostIPv4
     , proxyOnException :: SomeException -> IO () -- ^ What to do with exceptions thrown by either the application or server. Default: ignore server-generated exceptions (see 'InvalidRequest') and print application-generated applications to stderr.
     , proxyTimeout :: Int -- ^ Timeout value in seconds. Default value: 30
     , proxyRequestModifier :: Request -> IO Request -- ^ A function that allows the the request to be modified before being run. Default: 'return . id'.
     }
+
+-- | Which host to bind.
+--
+-- Note: The @IsString@ instance recognizes the following special values:
+--
+-- * @*@ means @HostAny@
+--
+-- * @*4@ means @HostIPv4@
+--
+-- * @*6@ means @HostIPv6@
+data HostPreference =
+    HostAny
+  | HostIPv4
+  | HostIPv6
+  | Host String
+    deriving (Show, Eq, Ord)
+
+instance IsString HostPreference where
+    -- The funny code coming up is to get around some irritating warnings from
+    -- GHC. I should be able to just write:
+    {-
+    fromString "*" = HostAny
+    fromString "*4" = HostIPv4
+    fromString "*6" = HostIPv6
+    -}
+    fromString s'@('*':s) =
+        case s of
+            [] -> HostAny
+            ['4'] -> HostIPv4
+            ['6'] -> HostIPv6
+            _ -> Host s'
+    fromString s = Host s
 
 -- | The default settings for the Proxy server. See the individual settings for
 -- the default value.
@@ -559,7 +658,7 @@ takeHeaders =
 
 takeHeadersPush :: THStatus
                 -> ByteString
-                -> ResourceT IO (THStatus, C.SinkResult ByteString [ByteString])
+                -> ResourceT IO (C.SinkStateResult THStatus ByteString [ByteString])
 takeHeadersPush (THStatus len _ _ ) _
     | len > maxTotalHeaderLength = throwIO OverLargeHeader
 takeHeadersPush (THStatus len lines prepend) bs =
@@ -567,7 +666,7 @@ takeHeadersPush (THStatus len lines prepend) bs =
         -- no newline.  prepend entire bs to next line
         Nothing -> do
             let len' = len + bsLen
-            return (THStatus len' lines (prepend . S.append bs), C.Processing)
+            return $ C.StateProcessing $ THStatus len' lines (prepend . S.append bs)
         Just nl -> do
             let end = nl
                 start = nl + 1
@@ -581,8 +680,8 @@ takeHeadersPush (THStatus len lines prepend) bs =
                     if start < bsLen
                         then do
                             let rest = SU.unsafeDrop start bs
-                            return (undefined, C.Done (Just rest) lines')
-                        else return (undefined, C.Done Nothing lines')
+                            return $ C.StateDone (Just rest) lines'
+                        else return $ C.StateDone Nothing lines'
                 -- more headers
                 else do
                     let len' = len + start
@@ -591,7 +690,7 @@ takeHeadersPush (THStatus len lines prepend) bs =
                         then do
                             let more = SU.unsafeDrop start bs
                             takeHeadersPush (THStatus len' lines' id) more
-                        else return (THStatus len' lines' id, C.Processing)
+                        else return $ C.StateProcessing $ THStatus len' lines' id
   where
     bsLen = S.length bs
     mnl = S.elemIndex 10 bs
@@ -683,7 +782,7 @@ proxyConnect th tm conn host prt req = do
             return $ Left $ "Unable to connect: " `mappend` B.pack (show exc)
         case eConn of
             Right uconn -> do
-                fromUpstream <- C.bufferSource $ C.Source $ return $ connSource uconn th
+                fromUpstream <- C.bufferSource $ connSource uconn th
                 liftIO $
                     connSendMany conn $ L.toChunks $ toLazyByteString
                                       $ headers (httpVersion req) H.statusOK [] False
@@ -692,7 +791,7 @@ proxyConnect th tm conn host prt req = do
                             runResourceT (fromUpstream C.$$ connSink conn wrTh)
                             T.cancel wrTh
                         ) killThread
-                fromClient <- C.bufferSource $ C.Source $ return $ connSource conn th
+                fromClient <- C.bufferSource $ connSource conn th
                 fromClient C.$$ connSink uconn th
                 return False
             Left errorMsg ->
