@@ -13,8 +13,8 @@ clean :
 proxy : example/proxy.hs $(LIBSRC)
 	$(GHC) --make $< -o $@
 
-request-rewrite-proxy : example/request-rewrite-proxy.hs
+request-rewrite-proxy : example/request-rewrite-proxy.hs $(LIBSRC)
 	$(GHC) --make $< -o $@
 
-proxy-test : test/proxy-test.hs test/TestServer.hs
+proxy-test : test/proxy-test.hs test/TestServer.hs $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
