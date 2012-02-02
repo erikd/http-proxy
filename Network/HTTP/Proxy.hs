@@ -744,7 +744,7 @@ proxyPlain th conn mgr req = do
                     -- RFC2616: Connection defaults to Close in HTTP/1.0 and Keep-Alive in HTTP/1.1
                     defaultClose = httpVersion req == H.HttpVersion 1 0
                 in  fromMaybe defaultClose mClose
-            outHdrs = [(n,v) | (n,v) <- requestHeaders req, n /= "Host"]
+            outHdrs = [(n,v) | (n,v) <- requestHeaders req, not $ n `elem` [ "Host", "Accept-Encoding" ]]
         liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
         let contentLength = if requestMethod req == "GET"
              then 0
