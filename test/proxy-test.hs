@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 ---------------------------------------------------------
 --
@@ -11,8 +11,8 @@ import Control.Monad.Trans.Resource
 import Network.HTTP.Proxy
 
 import Control.Concurrent (forkIO, killThread)
-import Control.Monad (forM_, when)
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad (forM_, unless, when)
+import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Trans.Class (lift)
 import Data.ByteString (ByteString)
 import Data.Conduit (($$))
@@ -30,6 +30,8 @@ testProxyPort, testServerPort :: Int
 testProxyPort = 31081
 testServerPort = 31080
 
+debug :: Bool
+debug = False
 
 main :: IO ()
 main = runResourceT $ do
@@ -40,6 +42,8 @@ main = runResourceT $ do
     liftIO $ putStrLn "Tests complete."
 
 --------------------------------------------------------------------------------
+
+type TestRequest = ( HT.Method, String, Maybe ByteString )
 
 data Result = Result Int [HT.Header] ByteString
 
@@ -54,20 +58,33 @@ printResult (Result status headers body) = do
 
 
 runTests :: ResourceT IO ()
-runTests = do
-    testUrl $ "http://localhost:" ++ show testServerPort ++ "/"
-    testUrl $ "http://www.mega-nerd.com/index.html"
+runTests = mapM_ testUrl
+    [ ( HT.methodGet,  "http://localhost:" ++ show testServerPort ++ "/", Nothing )
+    , ( HT.methodPost, "http://localhost:" ++ show testServerPort ++ "/", Nothing )
+    , ( HT.methodPost, "http://localhost:" ++ show testServerPort ++ "/", Just "Message\n" )
+    ]
 
 
-testUrl :: String -> ResourceT IO ()
-testUrl url = do
-    request <- lift $ HC.parseUrl url
+testUrl :: TestRequest -> ResourceT IO ()
+testUrl testreq = do
+    request <- lift $ setupRequest testreq
     direct <- httpRun request
     proxy <- httpRun $ HC.addProxy "localhost" testProxyPort request
-    when False $ liftIO $ do
+    when debug $ liftIO $ do
         printResult direct
         printResult proxy
     compareResult direct proxy
+
+
+setupRequest :: Monad m => TestRequest -> IO (HC.Request m)
+setupRequest (method, url, reqBody) = do
+    req <- HC.parseUrl url
+    return $ req
+        { HC.method = if HC.method req /= method then method else HC.method req
+        , HC.requestBody = case reqBody of
+                            Just x -> HC.RequestBodyBS x
+                            Nothing -> HC.requestBody req
+        }
 
 
 -- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
@@ -90,4 +107,4 @@ compareResult (Result sa ha ba) (Result sb hb bb) = liftIO $ do
     assert (ba == bb) $ "HTTP response bodies are different :\n" ++ BS.unpack ba ++ "\n-----------\n" ++ BS.unpack bb
   where
     assert :: Bool -> String -> IO ()
-    assert b msg = when (not b) $ error msg
+    assert b msg = unless b $ error msg
