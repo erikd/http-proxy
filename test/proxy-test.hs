@@ -62,6 +62,7 @@ runTests = mapM_ testUrl
     [ ( HT.methodGet,  "http://localhost:" ++ show testServerPort ++ "/", Nothing )
     , ( HT.methodPost, "http://localhost:" ++ show testServerPort ++ "/", Nothing )
     , ( HT.methodPost, "http://localhost:" ++ show testServerPort ++ "/", Just "Message\n" )
+    , ( HT.methodGet,  "http://localhost:" ++ show testServerPort ++ "/forbidden", Nothing )
     ]
 
 
@@ -84,6 +85,9 @@ setupRequest (method, url, reqBody) = do
         , HC.requestBody = case reqBody of
                             Just x -> HC.RequestBodyBS x
                             Nothing -> HC.requestBody req
+        -- In this test program we want to pass error pages back to the test
+        -- function so the error output can be compared.
+        , HC.checkStatus = \ _ _ -> Nothing
         }
 
 

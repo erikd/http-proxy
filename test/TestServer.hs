@@ -31,7 +31,16 @@ runTestServer port =
 
 
 serverApp :: Request -> ResourceT IO Response
-serverApp req = do
+serverApp req
+ | rawPathInfo req == "/forbidden" = do
+    let text = "This is the forbidden message.\n"
+    let respHeaders =
+            [ headerContentType "text/plain"
+            , headerContentLength $ fromString $ show $ BS.length text
+            ]
+    return $ responseBS statusForbidden respHeaders text
+
+ | otherwise = do
     let text = BS.concat
             [ "  Method          : " , requestMethod req , "\n"
             , "  HTTP Version    : " , fromString (show (httpVersion req)) , "\n"
