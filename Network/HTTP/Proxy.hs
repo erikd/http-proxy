@@ -764,13 +764,15 @@ proxyPlain th conn mgr req = do
              else readInt . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
 
         url <-
-            (\u -> u { HC.method = requestMethod req,
-                       HC.requestHeaders = outHdrs,
-                       HC.rawBody = True,
-                       HC.requestBody = HC.RequestBodySource contentLength
+            (\u -> u { HC.method = requestMethod req
+                     , HC.requestHeaders = outHdrs
+                     , HC.rawBody = True
+                     , HC.requestBody = HC.RequestBodySource contentLength
                                             $ fmap copyByteString
                                             $ requestBody req
-                                            })
+                     -- In a proxy we do not want to intercept non-2XX status codes.
+                     , HC.checkStatus = \ _ _ -> Nothing
+                     })
                 <$> lift (HC.parseUrl (B.unpack urlStr))
 
         HC.Response sc rh bodySource <- HC.http url mgr
