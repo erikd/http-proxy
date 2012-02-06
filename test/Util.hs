@@ -14,8 +14,7 @@ import Network.HTTP.Types
 import Data.ByteString                    (ByteString)
 import Data.String                        (fromString)
 
-import qualified Data.ByteString          as BS
-import qualified Data.ByteString.Char8    as BS8
+import qualified Data.ByteString.Char8    as BS
 import qualified Data.CaseInsensitive     as CI
 import qualified Network.HTTP.Conduit     as HC
 import qualified Network.HTTP.Types       as HT
@@ -60,7 +59,7 @@ dumpHttpResponse :: HT.Status -> HT.ResponseHeaders -> IO ()
 dumpHttpResponse s rh = do
     let text = BS.concat
             [ "------- Response from upsteam ----------------------------------------------------\n"
-            , "HTTP/1.0 ", BS8.pack (show (HT.statusCode s)), " ", HT.statusMessage s, "\n"
+            , "HTTP/1.0 ", BS.pack (show (HT.statusCode s)), " ", HT.statusMessage s, "\n"
             ]
 
     BS.putStr text
