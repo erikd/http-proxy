@@ -758,7 +758,7 @@ proxyPlain th conn mgr req = do
                     defaultClose = httpVersion req == H.HttpVersion 1 0
                 in  fromMaybe defaultClose mClose
             outHdrs = [(n,v) | (n,v) <- requestHeaders req, not $ n `elem` [ "Host", "Accept-Encoding", "Content-Length" ]]
-        liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
+        -- liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
         let contentLength = if requestMethod req == "GET"
              then 0
              else readInt . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
@@ -801,7 +801,7 @@ failRequest th conn req headerMsg bodyMsg =
 
 proxyConnect :: T.Handle -> T.Manager -> Connection -> ByteString -> Int -> Request -> ResourceT IO Bool
 proxyConnect th tm conn host prt req = do
-        liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack host ++ ":" ++ show prt
+        -- liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack host ++ ":" ++ show prt
         eConn <- liftIO $ do
             usock <- socketConnection `fmap` connectTo (B.unpack host) (PortNumber . fromIntegral $ prt)
             return $ Right usock
