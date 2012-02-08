@@ -804,7 +804,7 @@ proxyConnect th tm conn host prt req = do
                 fromUpstream <- C.bufferSource $ connSource uconn th
                 liftIO $
                     connSendMany conn $ L.toChunks $ toLazyByteString
-                                      $ headers (httpVersion req) H.statusOK [] False
+                                      $ headers (httpVersion req) statusConnectOK [] False
                 void $ with (forkIO $ do
                             wrTh <- T.registerKillThread tm
                             runResourceT (fromUpstream C.$$ connSink conn wrTh)
@@ -816,6 +816,8 @@ proxyConnect th tm conn host prt req = do
             Left errorMsg ->
                 failRequest th conn req errorMsg ("PROXY FAILURE\r\n" `mappend` errorMsg)
 
+statusConnectOK :: H.Status
+statusConnectOK = H.Status 200 "Connection established"
 
 connectTo :: HostName   -- Hostname
           -> PortID     -- Port Identifier
