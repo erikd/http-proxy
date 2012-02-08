@@ -9,6 +9,8 @@
 
 module Util where
 
+import Control.Monad.Trans.Resource
+
 import Data.ByteString (ByteString)
 import Data.String (fromString)
 
@@ -69,3 +71,10 @@ headerShow headers =
     BS.concat $ map hShow headers
   where
     hShow (f, v) = BS.concat [ "  ", CI.original f , ": " , v, "\n" ]
+
+--------------------------------------------------------------------------------
+
+withManagerSettings :: ResourceIO m => HC.ManagerSettings -> (HC.Manager -> ResourceT m a) -> m a
+withManagerSettings settings f = runResourceT $ do
+    (_, manager) <- withIO (HC.newManager settings) HC.closeManager
+    f manager
