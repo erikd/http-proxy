@@ -9,6 +9,7 @@
 
 module TestServer
     ( runTestServer
+    , runTestServerTLS
     , byteSink
     ) where
 
@@ -18,6 +19,7 @@ import Data.String
 import Network.HTTP.Types
 import Network.Wai
 import Network.Wai.Handler.Warp
+import Network.Wai.Handler.WarpTLS
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO)
@@ -38,6 +40,17 @@ runTestServer port =
     let settings = defaultSettings { settingsPort = port }
     in runSettings settings serverApp
 
+
+runTestServerTLS :: Int -> IO ()
+runTestServerTLS port =
+    let settings = defaultSettings { settingsPort = port }
+    in runTLS tlsSettings settings serverApp
+
+
+tlsSettings :: TLSSettings
+tlsSettings = TLSSettings "certificate.pem" "key.pem"
+
+--------------------------------------------------------------------------------
 
 serverApp :: Request -> ResourceT IO Response
 serverApp req
