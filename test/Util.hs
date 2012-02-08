@@ -9,16 +9,14 @@
 
 module Util where
 
-import Network.HTTP.Types
+import Data.ByteString (ByteString)
+import Data.String (fromString)
 
-import Data.ByteString                    (ByteString)
-import Data.String                        (fromString)
-
-import qualified Data.ByteString.Char8    as BS
-import qualified Data.CaseInsensitive     as CI
-import qualified Network.HTTP.Conduit     as HC
-import qualified Network.HTTP.Types       as HT
-import qualified Network.Wai              as Wai
+import qualified Data.ByteString.Char8 as BS
+import qualified Data.CaseInsensitive as CI
+import qualified Network.HTTP.Conduit as HC
+import qualified Network.HTTP.Types as HT
+import qualified Network.Wai as Wai
 
 
 dumpWaiRequest :: Wai.Request -> IO ()
@@ -66,7 +64,7 @@ dumpHttpResponse s rh = do
     BS.putStr $ BS.concat $ map (\ (f, v) -> BS.concat [ "    ", CI.original f, ": ", v, "\n" ]) rh
 
 
-headerShow :: [Header] -> ByteString
+headerShow :: [HT.Header] -> ByteString
 headerShow headers =
     BS.concat $ map hShow headers
   where
