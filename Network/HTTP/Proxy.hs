@@ -651,7 +651,7 @@ defaultSettings = Settings
             Just x -> go x
             Nothing ->
                 when (go' $ fromException e)
-                    $ hPutStrLn stderr $ show e
+                    $ hPutStrLn stderr $ "ProxyEx: " ++ show e
     , proxyTimeout = 30
     , proxyRequestModifier = return . id
     }
