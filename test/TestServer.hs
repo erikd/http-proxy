@@ -37,13 +37,13 @@ import Util
 
 runTestServer :: Int -> IO ()
 runTestServer port =
-    let settings = defaultSettings { settingsPort = port }
+    let settings = defaultSettings { settingsPort = port, settingsHost = "*6" }
     in runSettings settings serverApp
 
 
 runTestServerTLS :: Int -> IO ()
 runTestServerTLS port =
-    let settings = defaultSettings { settingsPort = port }
+    let settings = defaultSettings { settingsPort = port, settingsHost = "*6" }
     in runTLS tlsSettings settings serverApp
 
 
