@@ -95,6 +95,7 @@ import System.IO (hPutStrLn, stderr)
 import Network.HTTP.Proxy.ReadInt (readInt64)
 import qualified Data.IORef as I
 import Data.String (IsString (..))
+import Network.TLS (TLSCertificateUsage (..))
 
 #if WINDOWS
 import Control.Concurrent (threadDelay)
@@ -221,13 +222,14 @@ runSettingsConnection set getConn = do
     let onE = proxyOnException set
         port = proxyPort set
     tm <- T.initialize $ proxyTimeout set * 1000000
-    mgr <- HC.newManager HC.def
     forever $ do
         (conn, addr) <- getConn
         _ <- forkIO $ do
+            mgr <- HC.newManager managerSettingsNoCheck
             th <- T.registerKillThread tm
             serveConnection set th tm onE port conn addr mgr
             T.cancel th
+            HC.closeManager mgr
         return ()
 
 serveConnection :: Settings
@@ -855,5 +857,6 @@ firstSuccessful (p:ps) = catch p $ \e ->
         _  -> firstSuccessful ps
 
 
-
-
+managerSettingsNoCheck :: HC.ManagerSettings
+managerSettingsNoCheck =
+    HC.def { HC.managerCheckCerts = \ _ _ -> return CertificateUsageAccept }
