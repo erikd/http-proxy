@@ -32,7 +32,7 @@ connect-test : test/connect-test.hs $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
 
 warp-tls-test : test/warp-tls-test.hs $(LIBSRC)
-	$(GHC) --make $< -o $@
+	$(GHC) --make -i:test $< -o $@
 
 http-to-https-test : test/http-to-https-test.hs $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
