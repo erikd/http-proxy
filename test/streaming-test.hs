@@ -10,6 +10,7 @@
 import Blaze.ByteString.Builder
 import Control.Monad.Trans.Resource
 import Network.HTTP.Proxy
+import System.IO
 
 import Control.Applicative ((<$>))
 import Data.Char (isSpace)
@@ -36,7 +37,6 @@ testProxyPort, testServerPort :: Int
 testProxyPort = 31081
 testServerPort = 31080
 
-
 hugeLen :: Int64
 hugeLen = 8 * 1000 * 1000 * 1000
 
@@ -44,20 +44,26 @@ main :: IO ()
 main = runResourceT $ do
     -- Don't need to do anything with these ThreadIds
     _ <- with (forkIO $ runTestServer testServerPort) killThread
-    _ <- with (forkIO $ runProxy testProxyPort) killThread
-    testLargeGet  $ "http://localhost:" ++ show testServerPort ++ "/large-get?1000"
-    testLargeGet  $ "http://localhost:" ++ show testServerPort ++ "/large-get?" ++ show hugeLen
-    testLargePost $ "http://localhost:" ++ show testServerPort ++ "/large-post"
+    _ <- with (forkIO $ runProxySettings testProxySettings) killThread
+    testGet  1000 $ "http://localhost:" ++ show testServerPort
+    testPost 1000 $ "http://localhost:" ++ show testServerPort ++ "/large-post"
+    testGet  hugeLen $ "http://localhost:" ++ show testServerPort
+    testPost hugeLen $ "http://localhost:" ++ show testServerPort ++ "/large-post"
     liftIO $ putStrLn "All test passed"
+  where
+    testProxySettings = Network.HTTP.Proxy.defaultSettings
+                    { proxyHost = "*6"
+                    , proxyPort = testProxyPort
+                    }
 
 --------------------------------------------------------------------------------
 
-testLargeGet :: String -> ResourceT IO ()
-testLargeGet url = do
-    liftIO $ putStr "Testing large GET operation  : "
+testGet :: Int64 -> String -> ResourceT IO ()
+testGet size url = do
+    reportTest "GET " size
     request <-
             (\r -> r { HC.checkStatus = \ _ _ -> Nothing })
-                <$> lift (HC.parseUrl url)
+                <$> lift (HC.parseUrl $ url ++ "/large-get?" ++ show size)
     httpCheckGetBodySize $ HC.addProxy "localhost" testProxyPort request
     liftIO $ putStrLn "passed"
 
@@ -74,17 +80,17 @@ httpCheckGetBodySize req = liftIO $ HC.withManager $ \mgr -> do
 
 --------------------------------------------------------------------------------
 
-testLargePost :: String -> ResourceT IO ()
-testLargePost url = do
-    liftIO $ putStr "Testing large POST operation : "
+testPost :: Int64 -> String -> ResourceT IO ()
+testPost size url = do
+    reportTest "POST" size
     request <-
             (\r -> r { HC.method = "POST"
-                     , HC.requestBody = requestBodySource hugeLen
+                     , HC.requestBody = requestBodySource size
                      -- Disable expecptions for non-2XX status codes.
                      , HC.checkStatus = \ _ _ -> Nothing
                      })
                 <$> lift (HC.parseUrl url)
-    httpCheckPostResponse hugeLen $ HC.addProxy "localhost" testProxyPort request
+    httpCheckPostResponse size $ HC.addProxy "localhost" testProxyPort request
     liftIO $ putStrLn "passed"
 
 
@@ -100,6 +106,7 @@ httpCheckPostResponse postLen req = liftIO $ HC.withManager $ \mgr -> do
     when (len /= postLen) $
         error $ "httpCheckPostResponse : Post length " ++ show len ++ " should have been " ++ show postLen ++ "."
 
+--------------------------------------------------------------------------------
 
 requestBodySource :: Int64 -> HC.RequestBody IO
 requestBodySource len =
@@ -119,3 +126,9 @@ requestBodySource len =
     bsbytes = BS.replicate blockSize '?'
     bbytes = fromByteString bsbytes
 
+
+reportTest :: String -> Int64 -> ResourceT IO ()
+reportTest op size = liftIO $ do
+    let str = take 45 $ "Testing " ++ op ++ " operation  (" ++ show size ++ " bytes)             "
+    putStr $ str ++ ": "
+    hFlush stdout

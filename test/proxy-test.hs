@@ -37,9 +37,14 @@ main :: IO ()
 main = runResourceT $ do
     -- Don't need to do anything with these ThreadIds
     _ <- with (forkIO $ runTestServer testServerPort) killThread
-    _ <- with (forkIO $ runProxy testProxyPort) killThread
+    _ <- with (forkIO $ runProxySettings testProxySettings) killThread
     runTests
     liftIO $ putStrLn "Tests complete."
+  where
+    testProxySettings = defaultSettings
+                    { proxyHost = "*6"
+                    , proxyPort = testProxyPort
+                    }
 
 --------------------------------------------------------------------------------
 
