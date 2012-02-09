@@ -160,9 +160,16 @@ bindPort p s = do
     addrs <- getAddrInfo (Just hints) host port
     -- Choose an IPv6 socket if exists.  This ensures the socket can
     -- handle both IPv4 and IPv6 if v6only is false.
-    let addrs' = filter (\x -> addrFamily x == AF_INET6) addrs ++ filter (\x -> addrFamily x /= AF_INET6) addrs
+    let addrs4 = filter (\x -> addrFamily x /= AF_INET6) addrs
+        addrs6 = filter (\x -> addrFamily x == AF_INET6) addrs
+        addrs' =
+            case s of
+                HostIPv4 -> addrs4 ++ addrs6
+                HostIPv6 -> addrs6 ++ addrs4
+                _ -> addrs
 
-        tryAddrs (addr1:rest@(_:_)) = catch
+        tryAddrs (addr1:rest@(_:_)) =
+                                      catch
                                       (theBody addr1)
                                       (\(_ :: IOException) -> tryAddrs rest)
         tryAddrs (addr1:[])         = theBody addr1
@@ -172,7 +179,6 @@ bindPort p s = do
           (Network.Socket.socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr))
           sClose
           (\sock -> do
-              putStrLn $ show addr ++ " out of " ++ show addrs
               setSocketOption sock ReuseAddr 1
               bindSocket sock (addrAddress addr)
               listen sock maxListenQueue
