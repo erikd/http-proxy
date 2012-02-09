@@ -92,9 +92,9 @@ import Control.Monad (forever, when, void)
 import qualified Network.HTTP.Types as H
 import qualified Data.CaseInsensitive as CI
 import System.IO (hPutStrLn, stderr)
-import Network.HTTP.Proxy.ReadInt (readInt64)
 import qualified Data.IORef as I
 import Data.String (IsString (..))
+import qualified Data.ByteString.Lex.Integral as LI
 import Network.TLS (TLSCertificateUsage (..))
 
 #if WINDOWS
@@ -262,14 +262,14 @@ serveConnection settings th tm onException port conn remoteHost' mgr =
                         Just s -> do
                                 let (hs, ps) = case S.split 58 s of -- ':'
                                         [h] -> (h, if isSecure req then 443 else 80)
-                                        [h, p] -> (h, readInt p)
+                                        [h, p] -> (h, LI.readDecimal_ p)
                                         _ -> (serverName req, serverPort req)
                                 modReq <- liftIO $ proxyRequestModifier settings req { serverName = hs, serverPort = ps }
                                 proxyPlain th conn mgr modReq
                                         >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
             _ | requestMethod req == "CONNECT" ->
                 case B.split ':' (rawPathInfo req) of
-                    [h, p] -> proxyConnect th tm conn h (readInt p) req
+                    [h, p] -> proxyConnect th tm conn h (LI.readDecimal_ p) req
                                 >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
                     _      -> failRequest th conn req "Bad request" ("Bad request '" `mappend` rawPathInfo req `mappend` "'.")
                                 >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
@@ -333,7 +333,7 @@ parseRequest' conn port (firstLine:otherLines) remoteHost' src = do
     let len0 =
             case lookup "content-length" heads of
                 Nothing -> 0
-                Just bs -> readInt bs
+                Just bs -> LI.readDecimal_ bs
     let serverName' = takeUntil 58 host -- ':'
     rbody <-
         if len0 == 0
@@ -718,10 +718,6 @@ checkCR bs pos =
         else pos
 {-# INLINE checkCR #-}
 
-readInt :: Integral a => ByteString -> a
-readInt bs = fromIntegral $ readInt64 bs
-{-# INLINE readInt #-}
-
 
 serverHeader :: H.RequestHeaders -> H.RequestHeaders
 serverHeader hdrs = case lookup key hdrs of
@@ -755,7 +751,7 @@ proxyPlain th conn mgr req = do
         -- liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
         let contentLength = if requestMethod req == "GET"
              then 0
-             else readInt . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
+             else LI.readDecimal_ . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
 
         url <-
             (\u -> u { HC.method = requestMethod req
