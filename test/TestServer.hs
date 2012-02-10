@@ -48,7 +48,7 @@ runTestServerTLS port =
 
 
 tlsSettings :: TLSSettings
-tlsSettings = TLSSettings "certificate.pem" "key.pem"
+tlsSettings = TLSSettings "test/certificate.pem" "test/key.pem"
 
 --------------------------------------------------------------------------------
 
