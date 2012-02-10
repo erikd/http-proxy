@@ -11,8 +11,11 @@ clean :
 	find . -name \*.o -o -name \*.hi -exec rm -f {} \;
 	rm -rf dist $(TARGETS)
 
-check : proxy-test
+check : $(TARGETS)
 	./proxy-test
+	./streaming-test
+	./http-to-https-test
+	./connect-test
 
 #-------------------------------------------------------------------------------
 
@@ -28,12 +31,12 @@ proxy-test : test/proxy-test.hs test/TestServer.hs $(LIBSRC)
 streaming-test : test/streaming-test.hs test/TestServer.hs $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
 
-connect-test : test/connect-test.hs $(LIBSRC)
+connect-test : test/connect-test.hs test/TestServer.hs $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
 
-warp-tls-test : test/warp-tls-test.hs $(LIBSRC)
+warp-tls-test : test/warp-tls-test.hs test/TestServer.hs $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
 
-http-to-https-test : test/http-to-https-test.hs $(LIBSRC)
+http-to-https-test : test/http-to-https-test.hs test/TestServer.hs $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
 
