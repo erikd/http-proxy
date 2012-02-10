@@ -1,4 +1,4 @@
-TARGETS = proxy request-rewrite-proxy proxy-test connect-test
+TARGETS = proxy request-rewrite-proxy proxy-test
 
 GHC = ghc -Wall -Werror -fwarn-missing-signatures -fwarn-tabs -i:src
 
@@ -13,7 +13,6 @@ clean :
 
 check : $(TARGETS)
 	./proxy-test
-	./connect-test
 
 #-------------------------------------------------------------------------------
 
@@ -24,7 +23,4 @@ request-rewrite-proxy : example/request-rewrite-proxy.hs $(LIBSRC)
 	$(GHC) --make $< -o $@
 
 proxy-test : test/proxy-test.hs test/TestServer.hs $(LIBSRC)
-	$(GHC) --make -i:test $< -o $@
-
-connect-test : test/connect-test.hs $(TESTSRC) $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@

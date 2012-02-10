@@ -20,18 +20,19 @@ import Util
 
 
 debug :: Bool
-debug = True
+debug = False
 
 main :: IO ()
 main = connectTest
 
 connectTest :: IO ()
 connectTest = runResourceT $ do
+    printTestMsgR "HTTPS CONNECT test"
     -- Don't need to do anything with these ThreadIds
     _ <- with (forkIO $ runTestServerTLS testServerPort) killThread
     _ <- with (forkIO $ runProxySettings testProxySettings) killThread
     mapM_ (testSingleUrl debug) tests
-    liftIO $ putStrLn "Tests complete."
+    liftIO $ putStrLn "pass"
   where
     testProxySettings = defaultSettings
                     { proxyHost = "*6"
