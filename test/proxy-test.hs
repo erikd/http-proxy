@@ -45,8 +45,9 @@ main :: IO ()
 main = do
     basicTest
     warpTlsTest
-    httpToHtppsRewriteTest
     streamingTest
+    httpToHtppsRewriteTest
+    httpsConnectTest
 
 
 basicTest :: IO ()
@@ -206,3 +207,23 @@ httpToHtppsRewriteTest = runResourceT $ do
                     }
 
      | otherwise = return req
+
+httpsConnectTest :: IO ()
+httpsConnectTest = runResourceT $ do
+    printTestMsgR "HTTPS CONNECT test"
+    -- Don't need to do anything with these ThreadIds
+    _ <- with (forkIO $ runTestServerTLS testServerPort) killThread
+    _ <- with (forkIO $ runProxySettings testProxySettings) killThread
+    mapM_ (testSingleUrl debug) tests
+    liftIO $ putStrLn "pass"
+  where
+    testProxySettings = defaultSettings
+                    { proxyHost = "*6"
+                    , proxyPort = testProxyPort
+                    }
+    tests =
+        [ ( HT.methodGet,  "https://localhost:" ++ show testServerPort ++ "/", Nothing )
+        , ( HT.methodPost, "https://localhost:" ++ show testServerPort ++ "/", Nothing )
+        , ( HT.methodPost, "https://localhost:" ++ show testServerPort ++ "/", Just "Message\n" )
+        , ( HT.methodGet,  "https://localhost:" ++ show testServerPort ++ "/forbidden", Nothing )
+        ]
