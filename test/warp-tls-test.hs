@@ -2,12 +2,11 @@
 
 import Control.Monad.Trans.Resource
 import Network.TLS
-import Network.Wai
 
 import Control.Concurrent (forkIO, killThread)
+import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Trans.Class (lift)
-import Data.ByteString (ByteString)
 import Data.Conduit (($$))
 
 import qualified Data.ByteString.Char8 as BS
@@ -23,29 +22,27 @@ import Util
 testServerPort :: Int
 testServerPort = 31080
 
+debug :: Bool
+debug = False
+
 main :: IO ()
-main = runResourceT $ do
+main = warpTlsTest
+
+warpTlsTest :: IO ()
+warpTlsTest = runResourceT $ do
+    printTestMsgR "Test Warp with TLS"
     _ <- with (forkIO $ runTestServerTLS testServerPort) killThread
     let url = "https://localhost:" ++ show testServerPort ++ "/"
-    httpConduitUrl url
+    request <- lift $ HC.parseUrl url
+    direct@(Result _ hdrs _) <- httpRun request
+    let isWarp =
+            case lookup "server" hdrs of
+                Just s -> BS.isPrefixOf "Warp" s
+                Nothing -> False
+    unless isWarp $ error "No 'Server: Warp' header."
+    when debug $ liftIO $ printResult direct
+    liftIO $ putStrLn "passed"
 
-data Result = Result Int [HT.Header] ByteString
-
-
-printResult :: Result -> IO ()
-printResult (Result status headers body) = do
-    putStrLn $ "Status : " ++ show status
-    putStrLn "Headers :"
-    BS.putStr $ headerShow headers
-    putStrLn "Body :"
-    BS.putStr body
-
-
-httpConduitUrl :: String -> ResourceT IO ()
-httpConduitUrl urlstr = do
-    request <- lift $ HC.parseUrl urlstr
-    direct <- httpRun request
-    liftIO $ printResult direct
 
 -- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
 -- Response contains a Source which we need to read to generate our result.

@@ -7,113 +7,202 @@
 --
 ---------------------------------------------------------
 
+import Blaze.ByteString.Builder
 import Control.Monad.Trans.Resource
 import Network.HTTP.Proxy
 
+import Control.Applicative ((<$>))
 import Control.Concurrent (forkIO, killThread)
-import Control.Monad (forM_, unless, when)
+import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Trans.Class (lift)
-import Data.ByteString (ByteString)
+import Data.ByteString.Lex.Integral (readDecimal_)
+import Data.Char (isSpace)
 import Data.Conduit (($$))
+import Data.Int (Int64)
+import Data.Maybe (fromMaybe)
 
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
-import qualified Data.Conduit.Binary as BL
+import qualified Data.Conduit as DC
+import qualified Data.Conduit.Binary as CB
 import qualified Network.HTTP.Conduit as HC
 import qualified Network.HTTP.Types as HT
 
 import TestServer
-import Util (headerShow)
+import Util
 
-testProxyPort, testServerPort :: Int
-testProxyPort = 31081
-testServerPort = 31080
+
+hugeLen :: Int64
+hugeLen = 8 * 1000 * 1000 * 1000
+
 
 debug :: Bool
 debug = False
 
+
 main :: IO ()
-main = runResourceT $ do
+main = do
+    basicTest
+    warpTlsTest
+    httpToHtppsRewriteTest
+    streamingTest
+
+
+basicTest :: IO ()
+basicTest = runResourceT $ do
+    printTestMsgR "Basic tests"
     -- Don't need to do anything with these ThreadIds
     _ <- with (forkIO $ runTestServer testServerPort) killThread
     _ <- with (forkIO $ runProxySettings testProxySettings) killThread
-    runTests
-    liftIO $ putStrLn "Tests complete."
+    mapM_ (testSingleUrl debug) tests
+    liftIO $ putStrLn "passed"
   where
     testProxySettings = defaultSettings
                     { proxyHost = "*6"
                     , proxyPort = testProxyPort
                     }
+    tests =
+        [ ( HT.methodGet,  "http://localhost:" ++ show testServerPort ++ "/", Nothing )
+        , ( HT.methodPost, "http://localhost:" ++ show testServerPort ++ "/", Nothing )
+        , ( HT.methodPost, "http://localhost:" ++ show testServerPort ++ "/", Just "Message\n" )
+        , ( HT.methodGet,  "http://localhost:" ++ show testServerPort ++ "/forbidden", Nothing )
+        ]
 
 --------------------------------------------------------------------------------
 
-type TestRequest = ( HT.Method, String, Maybe ByteString )
-
-data Result = Result Int [HT.Header] ByteString
-
-
-printResult :: Result -> IO ()
-printResult (Result status headers body) = do
-    putStrLn $ "Status : " ++ show status
-    putStrLn "Headers :"
-    BS.putStr $ headerShow headers
-    putStrLn "Body :"
-    BS.putStrLn body
-
-
-runTests :: ResourceT IO ()
-runTests = mapM_ testUrl
-    [ ( HT.methodGet,  "http://localhost:" ++ show testServerPort ++ "/", Nothing )
-    , ( HT.methodPost, "http://localhost:" ++ show testServerPort ++ "/", Nothing )
-    , ( HT.methodPost, "http://localhost:" ++ show testServerPort ++ "/", Just "Message\n" )
-    , ( HT.methodGet,  "http://localhost:" ++ show testServerPort ++ "/forbidden", Nothing )
-    ]
+streamingTest :: IO ()
+streamingTest = runResourceT $ do
+    -- Don't need to do anything with these ThreadIds
+    _ <- with (forkIO $ runTestServer testServerPort) killThread
+    _ <- with (forkIO $ runProxySettings testProxySettings) killThread
+    streamingGetTest  1000 $ "http://localhost:" ++ show testServerPort
+    streamingPostTest 1000 $ "http://localhost:" ++ show testServerPort ++ "/large-post"
+    streamingGetTest  hugeLen $ "http://localhost:" ++ show testServerPort
+    streamingPostTest hugeLen $ "http://localhost:" ++ show testServerPort ++ "/large-post"
+  where
+    testProxySettings = Network.HTTP.Proxy.defaultSettings
+                    { proxyHost = "*6"
+                    , proxyPort = testProxyPort
+                    }
 
 
-testUrl :: TestRequest -> ResourceT IO ()
-testUrl testreq = do
-    request <- lift $ setupRequest testreq
+streamingGetTest :: Int64 -> String -> ResourceT IO ()
+streamingGetTest size url = do
+    opSizeMsgR "GET " size
+    request <-
+            (\r -> r { HC.checkStatus = \ _ _ -> Nothing })
+                <$> lift (HC.parseUrl $ url ++ "/large-get?" ++ show size)
+    httpCheckGetBodySize $ HC.addProxy "localhost" testProxyPort request
+    liftIO $ putStrLn "passed"
+
+
+httpCheckGetBodySize :: HC.Request IO -> ResourceT IO ()
+httpCheckGetBodySize req = liftIO $ HC.withManager $ \mgr -> do
+    HC.Response st hdrs bdy <- HC.http req mgr
+    when (st /= HT.statusOK) $
+        error $ "httpCheckGetBodySize : Bad status code : " ++ show st
+    let contentLength = readDecimal_ $ fromMaybe "0" $ lookup "content-length" hdrs
+    when (contentLength == (0 :: Int64)) $
+        error "httpCheckGetBodySize : content-length is zero."
+    bdy $$ byteSink contentLength
+
+--------------------------------------------------------------------------------
+
+streamingPostTest :: Int64 -> String -> ResourceT IO ()
+streamingPostTest size url = do
+    opSizeMsgR "POST" size
+    request <-
+            (\r -> r { HC.method = "POST"
+                     , HC.requestBody = requestBodySource size
+                     -- Disable expecptions for non-2XX status codes.
+                     , HC.checkStatus = \ _ _ -> Nothing
+                     })
+                <$> lift (HC.parseUrl url)
+    httpCheckPostResponse size $ HC.addProxy "localhost" testProxyPort request
+    liftIO $ putStrLn "passed"
+
+
+httpCheckPostResponse :: Int64 -> HC.Request IO -> ResourceT IO ()
+httpCheckPostResponse postLen req = liftIO $ HC.withManager $ \mgr -> do
+    HC.Response st _ bdy <- HC.http req mgr
+    when (st /= HT.statusOK) $
+        error $ "httpCheckGetBodySize : Bad status code : " ++ show st
+    bodyText <- bdy $$ CB.take 1024
+    let len = case BS.split ':' (BS.concat (LBS.toChunks bodyText)) of
+                ["Post-size", size] -> readDecimal_ $ BS.dropWhile isSpace size
+                _ -> error "httpCheckPostResponse : Not able to read Post-size."
+    when (len /= postLen) $
+        error $ "httpCheckPostResponse : Post length " ++ show len ++ " should have been " ++ show postLen ++ "."
+
+--------------------------------------------------------------------------------
+
+requestBodySource :: Int64 -> HC.RequestBody IO
+requestBodySource len =
+    HC.RequestBodySource len $ DC.sourceState 0 run
+  where
+    run :: MonadIO m => Int64 -> ResourceT m (DC.SourceStateResult Int64 Builder)
+    run count
+        | count >= len = return DC.StateClosed
+        | len - count > blockSize64 =
+            return $ DC.StateOpen (count + blockSize64) bbytes
+        | otherwise =
+            let n = len - count
+            in return $ DC.StateOpen (count + n) $ fromByteString $ BS.take blockSize bsbytes
+
+    blockSize = 4096
+    blockSize64 = fromIntegral blockSize :: Int64
+    bsbytes = BS.replicate blockSize '?'
+    bbytes = fromByteString bsbytes
+
+
+--------------------------------------------------------------------------------
+
+warpTlsTest :: IO ()
+warpTlsTest = runResourceT $ do
+    printTestMsgR "Test Warp with TLS"
+    _ <- with (forkIO $ runTestServerTLS testServerPort) killThread
+    let url = "https://localhost:" ++ show testServerPort ++ "/"
+    request <- lift $ HC.parseUrl url
+    direct@(Result _ hdrs _) <- httpRun request
+    let isWarp =
+            case lookup "server" hdrs of
+                Just s -> BS.isPrefixOf "Warp" s
+                Nothing -> False
+    unless isWarp $ error "No 'Server: Warp' header."
+    when debug $ liftIO $ printResult direct
+    liftIO $ putStrLn "passed"
+
+
+httpToHtppsRewriteTest :: IO ()
+httpToHtppsRewriteTest = runResourceT $ do
+    printTestMsgR "Rewrite HTTP to HTTPS test"
+
+    -- Don't need to do anything with these ThreadIds
+    _ <- with (forkIO $ runTestServerTLS testServerPort) killThread
+    _ <- with (forkIO $ runProxySettings proxySettings) killThread
+    request <- lift $ setupRequest
+        ( HT.methodGet,  "https://localhost:" ++ show testServerPort ++ "/", Nothing )
     direct <- httpRun request
-    proxy <- httpRun $ HC.addProxy "localhost" testProxyPort request
+    proxy <- httpRun $ HC.addProxy "localhost" testProxyPort $ request { HC.secure = False }
     when debug $ liftIO $ do
         printResult direct
         printResult proxy
     compareResult direct proxy
-
-
-setupRequest :: Monad m => TestRequest -> IO (HC.Request m)
-setupRequest (method, url, reqBody) = do
-    req <- HC.parseUrl url
-    return $ req
-        { HC.method = if HC.method req /= method then method else HC.method req
-        , HC.requestBody = case reqBody of
-                            Just x -> HC.RequestBodyBS x
-                            Nothing -> HC.requestBody req
-        -- In this test program we want to pass error pages back to the test
-        -- function so the error output can be compared.
-        , HC.checkStatus = \ _ _ -> Nothing
-        }
-
-
--- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
--- Response contains a Source which was need to read to generate our result.
-httpRun :: HC.Request IO -> ResourceT IO Result
-httpRun req = liftIO $ HC.withManager $ \mgr -> do
-    HC.Response st hdrs bdy <- HC.http req mgr
-    bodyText <- bdy $$ BL.take 8192
-    return $ Result (HT.statusCode st) hdrs $ BS.concat $ LBS.toChunks bodyText
-
-
--- | Compare results and error out if they're different.
-compareResult :: Result -> Result -> ResourceT IO ()
-compareResult (Result sa ha ba) (Result sb hb bb) = liftIO $ do
-    assert (sa == sb) $ "HTTP status codes don't match : " ++ show sa ++ " /= " ++ show sb
-    forM_ [ "server", "content-type", "content-length" ] $ \v ->
-        let xa = lookup v ha
-            xb = lookup v hb
-        in assert (xa == xb) $ "Header field '" ++ show v ++ "' doesn't match : '" ++ show xa ++ "' /= '" ++ show xb
-    assert (ba == bb) $ "HTTP response bodies are different :\n" ++ BS.unpack ba ++ "\n-----------\n" ++ BS.unpack bb
+    liftIO $ putStrLn "pass"
   where
-    assert :: Bool -> String -> IO ()
-    assert b msg = unless b $ error msg
+    proxySettings = defaultSettings
+                { proxyPort = testProxyPort
+                , proxyHost = "*6"
+                , proxyRequestModifier = httpsRedirector
+                }
+    httpsRedirector :: Request -> IO Request
+    httpsRedirector req
+     | serverName req == "localhost"
+        && not (isSecure req) = do
+             return $ req
+                    { isSecure = True
+                    , serverPort = testServerPort
+                    }
+
+     | otherwise = return req

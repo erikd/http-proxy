@@ -12,10 +12,9 @@ import Network.HTTP.Proxy
 import Network.TLS
 
 import Control.Concurrent (forkIO, killThread)
-import Control.Monad (forM_, unless, when)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Trans.Class (lift)
-import Data.ByteString (ByteString)
 import Data.Conduit (($$))
 
 import qualified Data.ByteString.Char8 as BS
@@ -32,15 +31,28 @@ testProxyPort = 31081
 testServerPort = 31080
 
 debug :: Bool
-debug = True
+debug = False
 
 main :: IO ()
-main = runResourceT $ do
+main = httpToHtppsRewriteTest
+
+
+httpToHtppsRewriteTest :: IO ()
+httpToHtppsRewriteTest = runResourceT $ do
+    printTestMsgR "Rewrite HTTP to HTTPS"
+
     -- Don't need to do anything with these ThreadIds
     _ <- with (forkIO $ runTestServerTLS testServerPort) killThread
     _ <- with (forkIO $ runProxySettings proxySettings) killThread
-    runTests
-    liftIO $ putStrLn "Tests complete."
+    request <- lift $ setupRequest
+        ( HT.methodGet,  "https://localhost:" ++ show testServerPort ++ "/", Nothing )
+    direct <- httpRun request
+    proxy <- httpRun $ HC.addProxy "localhost" testProxyPort $ request { HC.secure = False }
+    when debug $ liftIO $ do
+        printResult direct
+        printResult proxy
+    compareResult direct proxy
+    liftIO $ putStrLn "pass"
 
 
 proxySettings :: Settings
@@ -55,7 +67,6 @@ httpsRedirector :: Request -> IO Request
 httpsRedirector req
  | serverName req == "localhost"
     && not (isSecure req) = do
-         BS.putStrLn "Redirect"
          return $ req
                 { isSecure = True
                 , serverPort = testServerPort
@@ -64,37 +75,6 @@ httpsRedirector req
  | otherwise = return req
 
 --------------------------------------------------------------------------------
-
-type TestRequest = ( HT.Method, String, Maybe ByteString )
-
-data Result = Result Int [HT.Header] ByteString
-
-
-printResult :: Result -> IO ()
-printResult (Result status headers body) = do
-    putStrLn $ "Status : " ++ show status
-    putStrLn "Headers :"
-    BS.putStr $ headerShow headers
-    putStrLn "Body :"
-    BS.putStrLn body
-
-
-runTests :: ResourceT IO ()
-runTests = mapM_ testUrl
-    [ ( HT.methodGet,  "https://localhost:" ++ show testServerPort ++ "/", Nothing )
-    ]
-
-
-testUrl :: TestRequest -> ResourceT IO ()
-testUrl testreq = do
-    request <- lift $ setupRequest testreq
-    direct <- httpRun request
-    liftIO $ putStrLn "Direct done!"
-    proxy <- httpRun $ HC.addProxy "localhost" testProxyPort $ request { HC.secure = False }
-    when debug $ liftIO $ do
-        printResult direct
-        printResult proxy
-    compareResult direct proxy
 
 
 setupRequest :: Monad m => TestRequest -> IO (HC.Request m)
@@ -121,15 +101,3 @@ httpRun req = liftIO $ withManagerSettings settings $ \mgr -> do
   where
     settings = HC.def { HC.managerCheckCerts = \ _ _ -> return CertificateUsageAccept }
 
--- | Compare results and error out if they're different.
-compareResult :: Result -> Result -> ResourceT IO ()
-compareResult (Result sa ha ba) (Result sb hb bb) = liftIO $ do
-    assert (sa == sb) $ "HTTP status codes don't match : " ++ show sa ++ " /= " ++ show sb
-    forM_ [ "server", "content-type", "content-length" ] $ \v ->
-        let xa = lookup v ha
-            xb = lookup v hb
-        in assert (xa == xb) $ "Header field '" ++ show v ++ "' doesn't match : '" ++ show xa ++ "' /= '" ++ show xb
-    assert (ba == bb) $ "HTTP response bodies are different :\n" ++ BS.unpack ba ++ "\n-----------\n" ++ BS.unpack bb
-  where
-    assert :: Bool -> String -> IO ()
-    assert b msg = unless b $ error msg

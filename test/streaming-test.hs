@@ -10,7 +10,6 @@
 import Blaze.ByteString.Builder
 import Control.Monad.Trans.Resource
 import Network.HTTP.Proxy
-import System.IO
 
 import Control.Applicative ((<$>))
 import Data.Char (isSpace)
@@ -31,6 +30,7 @@ import qualified Network.HTTP.Conduit as HC
 import qualified Network.HTTP.Types as HT
 
 import TestServer
+import Util
 
 
 testProxyPort, testServerPort :: Int
@@ -40,16 +40,20 @@ testServerPort = 31080
 hugeLen :: Int64
 hugeLen = 8 * 1000 * 1000 * 1000
 
+
 main :: IO ()
-main = runResourceT $ do
+main = streamingTest
+
+
+streamingTest :: IO ()
+streamingTest = runResourceT $ do
     -- Don't need to do anything with these ThreadIds
     _ <- with (forkIO $ runTestServer testServerPort) killThread
     _ <- with (forkIO $ runProxySettings testProxySettings) killThread
-    testGet  1000 $ "http://localhost:" ++ show testServerPort
-    testPost 1000 $ "http://localhost:" ++ show testServerPort ++ "/large-post"
-    testGet  hugeLen $ "http://localhost:" ++ show testServerPort
-    testPost hugeLen $ "http://localhost:" ++ show testServerPort ++ "/large-post"
-    liftIO $ putStrLn "All test passed"
+    streamingGetTest  1000 $ "http://localhost:" ++ show testServerPort
+    streamingPostTest 1000 $ "http://localhost:" ++ show testServerPort ++ "/large-post"
+    streamingGetTest  hugeLen $ "http://localhost:" ++ show testServerPort
+    streamingPostTest hugeLen $ "http://localhost:" ++ show testServerPort ++ "/large-post"
   where
     testProxySettings = Network.HTTP.Proxy.defaultSettings
                     { proxyHost = "*6"
@@ -58,8 +62,8 @@ main = runResourceT $ do
 
 --------------------------------------------------------------------------------
 
-testGet :: Int64 -> String -> ResourceT IO ()
-testGet size url = do
+streamingGetTest :: Int64 -> String -> ResourceT IO ()
+streamingGetTest size url = do
     reportTest "GET " size
     request <-
             (\r -> r { HC.checkStatus = \ _ _ -> Nothing })
@@ -80,8 +84,8 @@ httpCheckGetBodySize req = liftIO $ HC.withManager $ \mgr -> do
 
 --------------------------------------------------------------------------------
 
-testPost :: Int64 -> String -> ResourceT IO ()
-testPost size url = do
+streamingPostTest :: Int64 -> String -> ResourceT IO ()
+streamingPostTest size url = do
     reportTest "POST" size
     request <-
             (\r -> r { HC.method = "POST"
@@ -128,7 +132,5 @@ requestBodySource len =
 
 
 reportTest :: String -> Int64 -> ResourceT IO ()
-reportTest op size = liftIO $ do
-    let str = take 45 $ "Testing " ++ op ++ " operation  (" ++ show size ++ " bytes)             "
-    putStr $ str ++ ": "
-    hFlush stdout
+reportTest op size =
+    printTestMsgR $ "Testing " ++ op ++ " operation  (" ++ show size ++ " bytes)"

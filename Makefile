@@ -1,9 +1,10 @@
 TARGETS = proxy request-rewrite-proxy proxy-test streaming-test connect-test \
 			warp-tls-test http-to-https-test
 
-GHC = ghc -Wall -fwarn-missing-signatures -fwarn-tabs -i:src
+GHC = ghc -Wall -Werror -fwarn-missing-signatures -fwarn-tabs -i:src
 
 LIBSRC = $(shell find Network -name \*.hs)
+TESTSRC = $(shell find test -name \*.hs)
 
 all : $(TARGETS)
 
@@ -13,9 +14,11 @@ clean :
 
 check : $(TARGETS)
 	./proxy-test
+	./connect-test
+	# The following can be removed later.
+	./warp-tls-test
 	./streaming-test
 	./http-to-https-test
-	./connect-test
 
 #-------------------------------------------------------------------------------
 
@@ -28,15 +31,15 @@ request-rewrite-proxy : example/request-rewrite-proxy.hs $(LIBSRC)
 proxy-test : test/proxy-test.hs test/TestServer.hs $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
 
-streaming-test : test/streaming-test.hs test/TestServer.hs $(LIBSRC)
+streaming-test : test/streaming-test.hs $(TESTSRC) $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
 
-connect-test : test/connect-test.hs test/TestServer.hs $(LIBSRC)
+connect-test : test/connect-test.hs $(TESTSRC) $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
 
-warp-tls-test : test/warp-tls-test.hs test/TestServer.hs $(LIBSRC)
+warp-tls-test : test/warp-tls-test.hs $(TESTSRC) $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
 
-http-to-https-test : test/http-to-https-test.hs test/TestServer.hs $(LIBSRC)
+http-to-https-test : test/http-to-https-test.hs $(TESTSRC) $(LIBSRC)
 	$(GHC) --make -i:test $< -o $@
 
