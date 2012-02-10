@@ -763,6 +763,7 @@ proxyPlain th conn mgr req = do
             (\u -> u { HC.method = requestMethod req
                      , HC.requestHeaders = outHdrs
                      , HC.rawBody = True
+                     , HC.secure = isSecure req
                      , HC.requestBody = HC.RequestBodySource contentLength
                                             $ fmap copyByteString
                                             $ requestBody req
