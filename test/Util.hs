@@ -113,6 +113,9 @@ opSizeMsgR :: String -> Int64 -> ResourceT IO ()
 opSizeMsgR op size =
     printTestMsgR $ "Testing " ++ op ++ " operation  (" ++ show size ++ " bytes)"
 
+printPassR :: ResourceT IO ()
+printPassR = liftIO $ putStrLn "pass"
+
 --------------------------------------------------------------------------------
 
 withManagerSettings :: ResourceIO m => HC.ManagerSettings -> (HC.Manager -> ResourceT m a) -> m a

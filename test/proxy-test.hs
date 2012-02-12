@@ -57,7 +57,7 @@ basicTest = runResourceT $ do
     _ <- with (forkIO $ runTestServer testServerPort) killThread
     _ <- with (forkIO $ runProxySettings testProxySettings) killThread
     mapM_ (testSingleUrl debug) tests
-    liftIO $ putStrLn "passed"
+    printPassR
   where
     testProxySettings = defaultSettings
                     { proxyHost = "*6"
@@ -95,7 +95,7 @@ streamingGetTest size url = do
             (\r -> r { HC.checkStatus = \ _ _ -> Nothing })
                 <$> lift (HC.parseUrl $ url ++ "/large-get?" ++ show size)
     httpCheckGetBodySize $ HC.addProxy "localhost" testProxyPort request
-    liftIO $ putStrLn "passed"
+    printPassR
 
 
 httpCheckGetBodySize :: HC.Request IO -> ResourceT IO ()
@@ -121,7 +121,7 @@ streamingPostTest size url = do
                      })
                 <$> lift (HC.parseUrl url)
     httpCheckPostResponse size $ HC.addProxy "localhost" testProxyPort request
-    liftIO $ putStrLn "passed"
+    printPassR
 
 
 httpCheckPostResponse :: Int64 -> HC.Request IO -> ResourceT IO ()
@@ -172,7 +172,7 @@ warpTlsTest = runResourceT $ do
                 Nothing -> False
     unless isWarp $ error "No 'Server: Warp' header."
     when debug $ liftIO $ printResult direct
-    liftIO $ putStrLn "passed"
+    printPassR
 
 
 httpToHtppsRewriteTest :: IO ()
@@ -190,7 +190,7 @@ httpToHtppsRewriteTest = runResourceT $ do
         printResult direct
         printResult proxy
     compareResult direct proxy
-    liftIO $ putStrLn "pass"
+    printPassR
   where
     proxySettings = defaultSettings
                 { proxyPort = testProxyPort
@@ -215,7 +215,7 @@ httpsConnectTest = runResourceT $ do
     _ <- with (forkIO $ runTestServerTLS testServerPort) killThread
     _ <- with (forkIO $ runProxySettings testProxySettings) killThread
     mapM_ (testSingleUrl debug) tests
-    liftIO $ putStrLn "pass"
+    printPassR
   where
     testProxySettings = defaultSettings
                     { proxyHost = "*6"
