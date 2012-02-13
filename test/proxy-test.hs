@@ -30,6 +30,7 @@ import qualified Network.HTTP.Conduit as HC
 import qualified Network.HTTP.Types as HT
 
 import TestServer
+import HttpHttpsRewriteTest
 import Util
 
 
@@ -45,9 +46,9 @@ main :: IO ()
 main = do
     basicTest
     warpTlsTest
-    streamingTest
-    httpToHtppsRewriteTest
     httpsConnectTest
+    httpToHttpsRewriteTest
+    streamingTest
 
 
 basicTest :: IO ()
@@ -174,39 +175,6 @@ warpTlsTest = runResourceT $ do
     when debug $ liftIO $ printResult direct
     printPassR
 
-
-httpToHtppsRewriteTest :: IO ()
-httpToHtppsRewriteTest = runResourceT $ do
-    printTestMsgR "Rewrite HTTP to HTTPS test"
-
-    -- Don't need to do anything with these ThreadIds
-    _ <- with (forkIO $ runTestServerTLS testServerPort) killThread
-    _ <- with (forkIO $ runProxySettings proxySettings) killThread
-    request <- lift $ setupRequest
-        ( HT.methodGet,  "https://localhost:" ++ show testServerPort ++ "/", Nothing )
-    direct <- httpRun request
-    proxy <- httpRun $ HC.addProxy "localhost" testProxyPort $ request { HC.secure = False }
-    when debug $ liftIO $ do
-        printResult direct
-        printResult proxy
-    compareResult direct proxy
-    printPassR
-  where
-    proxySettings = defaultSettings
-                { proxyPort = testProxyPort
-                , proxyHost = "*6"
-                , proxyRequestModifier = httpsRedirector
-                }
-    httpsRedirector :: Request -> IO Request
-    httpsRedirector req
-     | serverName req == "localhost"
-        && not (isSecure req) = do
-             return $ req
-                    { isSecure = True
-                    , serverPort = testServerPort
-                    }
-
-     | otherwise = return req
 
 httpsConnectTest :: IO ()
 httpsConnectTest = runResourceT $ do
