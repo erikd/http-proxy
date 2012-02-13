@@ -743,7 +743,8 @@ proxyPlain th conn mgr req = do
                            (80, False) -> mempty
                            (443, True) -> mempty
                            (n, _) -> fromString (":" ++ show n)
-            urlStr = "http://" `mappend` serverName req
+            urlStr = (if isSecure req then "https://" else "http://")
+                               `mappend` serverName req
                                `mappend` portStr
                                `mappend` rawPathInfo req
                                `mappend` rawQueryString req
