@@ -96,6 +96,7 @@ import qualified Data.IORef as I
 import Data.String (IsString (..))
 import qualified Data.ByteString.Lex.Integral as LI
 import Network.TLS (TLSCertificateUsage (..))
+import qualified Data.ByteString.Base64 as B64
 
 #if WINDOWS
 import Control.Concurrent (threadDelay)
@@ -271,7 +272,7 @@ serveConnection settings th tm onException port conn remoteHost' mgr =
                                         [h, p] -> (h, LI.readDecimal_ p)
                                         _ -> (serverName req, serverPort req)
                                 modReq <- liftIO $ proxyRequestModifier settings req { serverName = hs, serverPort = ps }
-                                proxyPlain th conn mgr modReq
+                                proxyPlain (proxyUpstream settings) th conn mgr modReq
                                         >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
             _ | requestMethod req == "CONNECT" ->
                 case B.split ':' (rawPathInfo req) of
@@ -606,6 +607,7 @@ data Settings = Settings
     , proxyOnException :: SomeException -> IO () -- ^ What to do with exceptions thrown by either the application or server. Default: ignore server-generated exceptions (see 'InvalidRequest') and print application-generated applications to stderr.
     , proxyTimeout :: Int -- ^ Timeout value in seconds. Default value: 30
     , proxyRequestModifier :: Request -> IO Request -- ^ A function that allows the the request to be modified before being run. Default: 'return . id'.
+    , proxyUpstream :: Maybe UpstreamProxy -- Optional upstream proxy hostname and port, with optional username/password for authenticating proxies.
     }
 
 -- | Which host to bind.
@@ -640,6 +642,9 @@ instance IsString HostPreference where
             _ -> Host s'
     fromString s = Host s
 
+
+type UpstreamProxy = (ByteString, Int, Maybe (ByteString, ByteString))
+
 -- | The default settings for the Proxy server. See the individual settings for
 -- the default value.
 defaultSettings :: Settings
@@ -654,6 +659,7 @@ defaultSettings = Settings
                     $ hPutStrLn stderr $ "ProxyEx: " ++ show e
     , proxyTimeout = 30
     , proxyRequestModifier = return . id
+    , proxyUpstream = Nothing
     }
   where
     go :: InvalidRequest -> IO ()
@@ -737,8 +743,8 @@ serverHeader hdrs = case lookup key hdrs of
 
 --------------------------------------------------------------------------------
 
-proxyPlain :: T.Handle -> Connection -> HC.Manager -> Request -> ResourceT IO Bool
-proxyPlain th conn mgr req = do
+proxyPlain :: Maybe UpstreamProxy -> T.Handle -> Connection -> HC.Manager -> Request -> ResourceT IO Bool
+proxyPlain upstream th conn mgr req = do
         let portStr = case (serverPort req, isSecure req) of
                            (80, False) -> mempty
                            (443, True) -> mempty
@@ -760,14 +766,26 @@ proxyPlain th conn mgr req = do
              then 0
              else LI.readDecimal_ . fromMaybe "0" . lookup "content-length" . requestHeaders $ req
 
+        let (proxy, pauth) = case upstream of
+                                 Nothing -> (Nothing, [])
+                                 Just (ph, pp, Nothing) ->
+                                         ( Just (HC.Proxy ph pp), [])
+                                 Just (ph, pp, Just (u, p)) ->
+                                         ( Just (HC.Proxy ph pp)
+                                         , [ ( "Proxy-Authorization"
+                                             , B.append "Basic " (B64.encode $ B.concat [ u, ":", p ])
+                                             )
+                                           ] )
+
         url <-
             (\u -> u { HC.method = requestMethod req
-                     , HC.requestHeaders = outHdrs
+                     , HC.requestHeaders = pauth ++ outHdrs
                      , HC.rawBody = True
                      , HC.secure = isSecure req
                      , HC.requestBody = HC.RequestBodySource contentLength
                                             $ fmap copyByteString
                                             $ requestBody req
+                     , HC.proxy = proxy
                      -- In a proxy we do not want to intercept non-2XX status codes.
                      , HC.checkStatus = \ _ _ -> Nothing
                      })
