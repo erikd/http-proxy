@@ -102,7 +102,7 @@ streamingGetTest size url = do
 httpCheckGetBodySize :: HC.Request IO -> ResourceT IO ()
 httpCheckGetBodySize req = liftIO $ HC.withManager $ \mgr -> do
     HC.Response st hdrs bdy <- HC.http req mgr
-    when (st /= HT.statusOK) $
+    when (st /= HT.status200) $
         error $ "httpCheckGetBodySize : Bad status code : " ++ show st
     let contentLength = readDecimal_ $ fromMaybe "0" $ lookup "content-length" hdrs
     when (contentLength == (0 :: Int64)) $
@@ -128,7 +128,7 @@ streamingPostTest size url = do
 httpCheckPostResponse :: Int64 -> HC.Request IO -> ResourceT IO ()
 httpCheckPostResponse postLen req = liftIO $ HC.withManager $ \mgr -> do
     HC.Response st _ bdy <- HC.http req mgr
-    when (st /= HT.statusOK) $
+    when (st /= HT.status200) $
         error $ "httpCheckGetBodySize : Bad status code : " ++ show st
     bodyText <- bdy $$ CB.take 1024
     let len = case BS.split ':' (BS.concat (LBS.toChunks bodyText)) of

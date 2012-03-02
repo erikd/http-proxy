@@ -60,7 +60,7 @@ serverApp req
             [ headerContentType "text/plain"
             , headerContentLength $ fromString $ show $ BS.length text
             ]
-    return $ responseBS statusForbidden respHeaders text
+    return $ responseBS status403 respHeaders text
 
  | rawPathInfo req == "/large-get" = do
     let len = readDecimal_ $ BS.drop 1 $ rawQueryString req
@@ -68,7 +68,7 @@ serverApp req
             [ headerContentType "text/plain"
             , headerContentLength $ fromString $ show len
             ]
-    return $ ResponseSource statusOK respHeaders $ byteSource len
+    return $ ResponseSource status200 respHeaders $ byteSource len
 
  | rawPathInfo req == "/large-post"
     && requestMethod req == "POST" = do
@@ -95,7 +95,7 @@ serverApp req
             [ headerContentType "text/plain"
             , headerContentLength $ fromString $ show $ BS.length text
             ]
-    return $ responseBS statusOK respHeaders text
+    return $ responseBS status200 respHeaders text
 
 
 -- Network.Wai provides a responseLBS (build a response from a lazy ByteString).
@@ -112,7 +112,7 @@ largePostLenZero = do
                 [ headerContentType "text/plain"
                 , headerContentLength $ fromString $ show $ BS.length text
                 ]
-    return $ responseBS statusBadRequest respHeaders text
+    return $ responseBS status400 respHeaders text
 
 
 largePostCheck :: Int64 -> DC.Source IO ByteString -> ResourceT IO Response
@@ -123,7 +123,7 @@ largePostCheck len rbody = do
             [ headerContentType "text/plain"
             , headerContentLength $ fromString $ show $ BS.length text
             ]
-    return $ responseBS statusOK respHeaders text
+    return $ responseBS status200 respHeaders text
 
 --------------------------------------------------------------------------------
 
