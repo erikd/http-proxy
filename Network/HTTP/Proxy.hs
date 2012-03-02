@@ -607,6 +607,7 @@ data Settings = Settings
     , proxyOnException :: SomeException -> IO () -- ^ What to do with exceptions thrown by either the application or server. Default: ignore server-generated exceptions (see 'InvalidRequest') and print application-generated applications to stderr.
     , proxyTimeout :: Int -- ^ Timeout value in seconds. Default value: 30
     , proxyRequestModifier :: Request -> IO Request -- ^ A function that allows the the request to be modified before being run. Default: 'return . id'.
+    , proxyLogger :: ByteString -> IO () -- ^ A function for logging proxy internal state. Default: 'return ()'.
     , proxyUpstream :: Maybe UpstreamProxy -- Optional upstream proxy hostname and port, with optional username/password for authenticating proxies.
     }
 
@@ -659,6 +660,7 @@ defaultSettings = Settings
                     $ hPutStrLn stderr $ "ProxyEx: " ++ show e
     , proxyTimeout = 30
     , proxyRequestModifier = return . id
+    , proxyLogger = \ _ -> return ()
     , proxyUpstream = Nothing
     }
   where
