@@ -35,6 +35,7 @@ module Network.HTTP.Proxy
 
     , Settings (..)
     , defaultSettings
+    , UpstreamProxy (..)
     , Request (..)
     )
 where
@@ -608,7 +609,7 @@ data Settings = Settings
     , proxyTimeout :: Int -- ^ Timeout value in seconds. Default value: 30
     , proxyRequestModifier :: Request -> IO Request -- ^ A function that allows the the request to be modified before being run. Default: 'return . id'.
     , proxyLogger :: ByteString -> IO () -- ^ A function for logging proxy internal state. Default: 'return ()'.
-    , proxyUpstream :: Maybe UpstreamProxy -- Optional upstream proxy hostname and port, with optional username/password for authenticating proxies.
+    , proxyUpstream :: Maybe UpstreamProxy -- ^ Optional upstream proxy.
     }
 
 -- | Which host to bind.
@@ -643,8 +644,14 @@ instance IsString HostPreference where
             _ -> Host s'
     fromString s = Host s
 
-
-type UpstreamProxy = (ByteString, Int, Maybe (ByteString, ByteString))
+-- | A http-proxy can be configured to use and upstream proxy by providing the
+-- proxy name, the port it listens to and an option username and password for
+-- proxy authorisation.
+data UpstreamProxy = UpstreamProxy
+    { upstreamHost :: ByteString -- ^ The upstream proxy's hostname.
+    , upstreamPort :: Int -- ^ The upstream proxy's port number.
+    , upstreamAuth :: Maybe (ByteString, ByteString) -- ^ Optional username and password to use with upstream proxy.
+    }
 
 -- | The default settings for the Proxy server. See the individual settings for
 -- the default value.
@@ -770,9 +777,9 @@ proxyPlain upstream th conn mgr req = do
 
         let (proxy, pauth) = case upstream of
                                  Nothing -> (Nothing, [])
-                                 Just (ph, pp, Nothing) ->
+                                 Just (UpstreamProxy ph pp Nothing) ->
                                          ( Just (HC.Proxy ph pp), [])
-                                 Just (ph, pp, Just (u, p)) ->
+                                 Just (UpstreamProxy ph pp (Just (u, p))) ->
                                          ( Just (HC.Proxy ph pp)
                                          , [ ( "Proxy-Authorization"
                                              , B.append "Basic " (B64.encode $ B.concat [ u, ":", p ])
