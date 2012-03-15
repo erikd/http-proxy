@@ -11,10 +11,11 @@
 --
 -- History:
 --   This code originated in Michael Snoyman's Warp package when Warp was based
---   on the Data.Source library. That code was modified by Stephen Blackheath
---   to turn it into a HTTP/HTTP proxy and from there fell under the maintainership
---   of Erik de Castro Lopo who then did the conversion from Data.Enumerator to
---   Data.Conduit. During that conversion, Warp was again used as a reference.
+--   on the Data.Enumerator library. That code was modified by Stephen
+--   Blackheath to turn it into a HTTP/HTTPS proxy and from there fell under the
+--   maintainership of Erik de Castro Lopo who then did the conversion from
+--   Data.Enumerator to Data.Conduit. During that conversion, Warp was again
+--   used as a reference.
 --
 ---------------------------------------------------------
 
