@@ -73,7 +73,7 @@ import qualified Network.HTTP.Conduit as HC
 
 import Data.Typeable (Typeable)
 
-import Control.Monad.Trans.Resource (ResourceT, runResourceT, with)
+import Control.Monad.Trans.Resource (ResourceT, runResourceT, allocate)
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as CL
 import Data.Conduit.Blaze (builderToByteString)
@@ -241,6 +241,63 @@ runSettingsConnection set getConn = do
             HC.closeManager mgr
         return ()
 
+-- | Contains a @Source@ and a byte count that is still to be read in.
+newtype IsolatedBSSource = IsolatedBSSource (I.IORef (Int, C.Source (ResourceT IO) ByteString))
+
+-- | Given an @IsolatedBSSource@ provide a @Source@ that only allows up to the
+-- specified number of bytes to be passed downstream. All leftovers should be
+-- retained within the @Source@. If there are not enough bytes available,
+-- throws a @ConnectionClosedByPeer@ exception.
+ibsIsolate :: IsolatedBSSource -> C.Source (ResourceT IO) ByteString
+ibsIsolate ibs@(IsolatedBSSource ref) =
+    C.PipeM pull (return ())
+  where
+    pull = do
+        (count, src) <- liftIO $ I.readIORef ref
+        if count == 0
+            -- No more bytes wanted downstream, so we're done.
+            then return $ C.Done Nothing ()
+            else do
+                -- Get the next chunk (if available) and the updated source
+                (src', mbs) <- src C.$$+ CL.head
+
+                -- If no chunk available, then there aren't enough bytes in the
+                -- stream. Throw a ConnectionClosedByPeer
+                bs <- maybe (liftIO $ throwIO ConnectionClosedByPeer) return mbs
+
+                let -- How many of the bytes in this chunk to send downstream
+                    toSend = min count (S.length bs)
+                    -- How many bytes will still remain to be sent downstream
+                    count' = count - toSend
+                case () of
+                    ()
+                        -- The expected count is greater than the size of the
+                        -- chunk we just read. Send the entire chunk
+                        -- downstream, and then loop on this function for the
+                        -- next chunk.
+                        | count' > 0 -> do
+                            liftIO $ I.writeIORef ref (count', src')
+                            return $ C.HaveOutput (ibsIsolate ibs) (return ()) bs
+
+                        -- The expected count is the total size of the chunk we
+                        -- just read. Send this chunk downstream, and then
+                        -- terminate the stream.
+                        | count == S.length bs -> do
+                            liftIO $ I.writeIORef ref (count', src')
+                            return $ C.HaveOutput (C.Done Nothing ()) (return ()) bs
+
+                        -- Some of the bytes in this chunk should not be sent
+                        -- downstream. Split up the chunk into the sent and
+                        -- not-sent parts, add the not-sent parts onto the new
+                        -- source, and send the rest of the chunk downstream.
+                        | otherwise -> do
+                            let (x, y) = S.splitAt toSend bs
+                            liftIO $ I.writeIORef ref (count', C.HaveOutput src' (return ()) y)
+                            return $ C.HaveOutput (C.Done Nothing ()) (return ()) x
+
+-- | Extract the underlying @Source@ from an @IsolatedBSSource@, which will not
+-- perform any more isolation.
+
 serveConnection :: Settings
                 -> T.Handle
                 -> T.Manager
@@ -258,13 +315,14 @@ serveConnection settings th tm onException port conn remoteHost' mgr =
   where
     serveConnection' :: ResourceT IO ()
     serveConnection' = do
-        fromClient <- C.bufferSource $ connSource conn th
+        let fromClient = connSource conn th
         serveConnection'' fromClient
 
+    serveConnection'' :: C.Source (ResourceT IO) ByteString -> ResourceT IO ()
     serveConnection'' fromClient = do
-        req <- parseRequest conn port remoteHost' fromClient
+        (req, _ibs) <- parseRequest conn port remoteHost' fromClient
         case req of
-            _ | requestMethod req `elem` [ "GET", "POST" ] -> do
+            _ | requestMethod req `elem` [ "GET", "POST" ] ->
                     case lookup "host" (requestHeaders req) of
                         Nothing -> failRequest th conn req "Bad proxy request" ("Request '" `mappend` rawPathInfo req `mappend` "'.")
                                         >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
@@ -286,12 +344,13 @@ serveConnection settings th tm onException port conn remoteHost' mgr =
                 failRequest th conn req "Unknown request" ("Unknown request '" `mappend` rawPathInfo req `mappend` "'.")
                                 >>= \keepAlive -> when keepAlive $ serveConnection'' fromClient
 
+
 parseRequest :: Connection -> Port -> SockAddr
-             -> C.BufferedSource IO S.ByteString
-             -> ResourceT IO Request
-parseRequest conn port remoteHost' src = do
-    headers' <- src C.$$ takeHeaders
-    parseRequest' conn port headers' remoteHost' src
+             -> C.Source (ResourceT IO) S.ByteString
+             -> ResourceT IO (Request, IsolatedBSSource)
+parseRequest conn port remoteHost' src1 = do
+    (src2, headers') <- src1 C.$$+ takeHeaders
+    parseRequest' conn port headers' remoteHost' src2
 
 -- FIXME come up with good values here
 bytesPerRead, maxTotalHeaderLength :: Int
@@ -303,6 +362,7 @@ data InvalidRequest =
     | BadFirstLine String
     | NonHttp
     | IncompleteHeaders
+    | ConnectionClosedByPeer
     | OverLargeHeader
     deriving (Show, Typeable, Eq)
 instance Exception InvalidRequest
@@ -326,8 +386,8 @@ parseRequest' :: Connection
               -> Port
               -> [ByteString]
               -> SockAddr
-              -> C.BufferedSource IO S.ByteString
-              -> ResourceT IO Request
+              -> C.Source (ResourceT IO) S.ByteString -- FIXME was buffered
+              -> ResourceT IO (Request, IsolatedBSSource)
 parseRequest' _ _ [] _ _ = throwIO $ NotEnoughLines []
 parseRequest' conn port (firstLine:otherLines) remoteHost' src = do
     (method, rpath', gets, httpversion) <- parseFirst firstLine
@@ -344,58 +404,10 @@ parseRequest' conn port (firstLine:otherLines) remoteHost' src = do
                 Nothing -> 0
                 Just bs -> LI.readDecimal_ bs
     let serverName' = takeUntil 58 host -- ':'
-    rbody <-
-        if len0 == 0
-            then return mempty
-            else do
-                -- We can't use the standard isolate, as its counter is not
-                -- kept in a mutable variable.
-                lenRef <- liftIO $ I.newIORef len0
-                let isolate = C.Conduit push close
-                    push bs = do
-                        len <- liftIO $ I.readIORef lenRef
-                        let (a, b) = S.splitAt len bs
-                            len' = len - S.length a
-                        liftIO $ I.writeIORef lenRef len'
-                        return $ if len' == 0
-                            then C.Finished (if S.null b then Nothing else Just b) (if S.null a then [] else [a])
-                            else C.Producing isolate [a]
-                    close = return []
-
-                    -- Make sure that we don't connect to the source after the
-                    -- isolate conduit closes.
-                    --
-                    -- Here's the issue: we fuse our buffered request body with
-                    -- an isolate conduit which ensures no more than X bytes
-                    -- are read. Suppose we read all X bytes, and then we call
-                    -- requestBody again. What happens?
-                    --
-                    -- Previously, we would try to read one more chunk from the
-                    -- buffered source. This is inherent to conduit: we
-                    -- wouldn't know that the isolate Conduit isn't accepting
-                    -- more data until after we've pushed some data to it. This
-                    -- results in hanging, since there's no data available on
-                    -- the wire.
-                    --
-                    -- Instead, we add a wrapper that checks if the request
-                    -- body has already been depleted before making that first
-                    -- pull.
-                    --
-                    -- Possible optimization: do away with the Conduit
-                    -- entirely. However, this may be less efficient overall,
-                    -- as we'd now have to check the BufferedSource status on
-                    -- each call. Worth looking into.
-
-                    wrap src' = C.Source
-                        { C.sourcePull = do
-                            len <- liftIO $ I.readIORef lenRef
-                            if len <= 0
-                                then return C.Closed
-                                else C.sourcePull src'
-                        , C.sourceClose = return ()
-                        }
-                return $ wrap $ src C.$= isolate
-    return Request
+    (rbody, ibs) <- liftIO $ do
+        ibs <- fmap IsolatedBSSource $ I.newIORef (len0, src)
+        return (ibsIsolate ibs, ibs)
+    return (Request
             { requestMethod = method
             , httpVersion = httpversion
             , pathInfo = H.decodePathSegments rpath
@@ -409,7 +421,7 @@ parseRequest' conn port (firstLine:otherLines) remoteHost' src = do
             , remoteHost = remoteHost'
             , requestBody = rbody
             , vault = mempty
-            }
+            }, ibs)
 
 
 takeUntil :: Word8 -> ByteString -> ByteString
@@ -492,7 +504,7 @@ hasBody s req = s /= H.Status 204 "" && s /= H.status304 &&
 
 sendResponse :: T.Handle
              -> Request -> Connection -> Response -> ResourceT IO Bool
-sendResponse th req conn r = sendResponse' r
+sendResponse th req conn = sendResponse'
   where
     version = httpVersion req
     isPersist = checkPersist req
@@ -511,10 +523,7 @@ sendResponse th req conn r = sendResponse' r
                 connSendAll conn bs
                 T.tickle th) body
               return (isKeepAlive hs)
-        | otherwise = liftIO $ do
-            sendHeader $ headers' False
-            T.tickle th
-            return isPersist
+        | otherwise = sendOtherwise headers'
       where
         headers' = headers version s hs
         needsChunked' = needsChunked hs
@@ -530,26 +539,31 @@ sendResponse th req conn r = sendResponse' r
                       (if needsChunked' then body C.$= chunk else body)
             src C.$$ builderToByteString C.=$ connSink conn th
             return $ isKeepAlive hs
-        | otherwise = liftIO $ do
-            sendHeader $ headers' False
-            T.tickle th
-            return isPersist
+        | otherwise = sendOtherwise headers'
       where
-        body = fmap (\x -> case x of
+        body = fmap2 (\x -> case x of
                         C.Flush -> flush
                         C.Chunk builder -> builder) bodyFlush
         headers' = headers version s hs
         -- FIXME perhaps alloca a buffer per thread and reuse that in all
         -- functions below. Should lessen greatly the GC burden (I hope)
         needsChunked' = needsChunked hs
-        chunk :: C.Conduit Builder IO Builder
-        chunk = C.Conduit
-            { C.conduitPush = push
-            , C.conduitClose = close
-            }
-        conduit = C.Conduit push close
-        push x = return $ C.Producing conduit [chunkedTransferEncoding x]
-        close = return [chunkedTransferTerminator]
+        chunk :: C.Conduit Builder (ResourceT IO) Builder
+        chunk = C.NeedInput push close
+        push x = C.HaveOutput chunk (return ()) (chunkedTransferEncoding x)
+        close = C.HaveOutput (C.Done Nothing ()) (return ()) chunkedTransferTerminator
+
+    sendOtherwise hdrs =  liftIO $ do
+            sendHeader $ hdrs False
+            T.tickle th
+            return isPersist
+
+
+fmap2 :: Functor m => (o1 -> o2) -> C.Pipe i o1 m r -> C.Pipe i o2 m r
+fmap2 f (C.HaveOutput p c o) = C.HaveOutput (fmap2 f p) c (f o)
+fmap2 f (C.NeedInput p c) = C.NeedInput (fmap2 f . p) (fmap2 f c)
+fmap2 f (C.PipeM mp c) = C.PipeM (fmap (fmap2 f) mp) c
+fmap2 _ (C.Done i x) = C.Done i x
 
 parseHeaderNoAttr :: ByteString -> H.Header
 parseHeaderNoAttr s =
@@ -561,33 +575,31 @@ parseHeaderNoAttr s =
                    else rest
      in (CI.mk k, rest')
 
-connSource :: Connection -> T.Handle -> C.Source IO ByteString
+connSource :: Connection -> T.Handle -> C.Source (ResourceT IO) ByteString
 connSource Connection { connRecv = recv } th =
     src
   where
-    src = C.Source
-        { C.sourcePull = do
-            bs <- liftIO recv
-            if S.null bs
-                then return C.Closed
-                else do
-                    when (S.length bs >= 2048) $ liftIO $ T.tickle th
-                    return (C.Open src bs)
-        , C.sourceClose = return ()
-        }
+    src = C.PipeM (do
+        bs <- liftIO recv
+        if S.null bs
+            then return $ C.Done Nothing ()
+            else do
+                when (S.length bs >= 2048) $ liftIO $ T.tickle th
+                return (C.HaveOutput src (return ()) bs))
+        (return ())
 
 -- | Use 'connSendAll' to send this data while respecting timeout rules.
-connSink :: Connection -> T.Handle -> C.Sink B.ByteString IO ()
+connSink :: Connection -> T.Handle -> C.Sink B.ByteString (ResourceT IO) ()
 connSink Connection { connSendAll = send } th =
-    C.SinkData push close
+    sink
   where
+    sink = C.NeedInput push close
     close = liftIO (T.resume th)
-    push x = do
-        liftIO $ do
-            T.resume th
-            send x
-            T.pause th
-        return (C.Processing push close)
+    push x = C.PipeM (liftIO $ do
+        T.resume th
+        send x
+        T.pause th
+        return sink) (liftIO $ T.resume th)
     -- We pause timeouts before passing control back to user code. This ensures
     -- that a timeout will only ever be executed when Warp is in control. We
     -- also make sure to resume the timeout after the completion of user code
@@ -685,52 +697,56 @@ data THStatus = THStatus
     BSEndoList -- previously parsed lines
     BSEndo -- bytestrings to be prepended
 
-takeHeaders :: C.Sink ByteString IO [ByteString]
+takeHeaders :: C.Sink ByteString (ResourceT IO) [ByteString]
 takeHeaders =
-    C.sinkState (THStatus 0 id id) takeHeadersPush close
+    C.NeedInput (push (THStatus 0 id id)) close
   where
-    close _ = throwIO IncompleteHeaders
-{-# INLINE takeHeaders #-}
+    close = throwIO IncompleteHeaders
 
-takeHeadersPush :: THStatus
-                -> ByteString
-                -> ResourceT IO (C.SinkStateResult THStatus ByteString [ByteString])
-takeHeadersPush (THStatus len _ _ ) _
-    | len > maxTotalHeaderLength = throwIO OverLargeHeader
-takeHeadersPush (THStatus len lines prepend) bs =
-    case mnl of
-        -- no newline.  prepend entire bs to next line
-        Nothing -> do
-            let len' = len + bsLen
-            return $ C.StateProcessing $ THStatus len' lines (prepend . S.append bs)
-        Just nl -> do
-            let end = nl
-                start = nl + 1
-                line = prepend (if end > 0
-                                    then SU.unsafeTake (checkCR bs end) bs
-                                    else S.empty)
-            if S.null line
-                -- no more headers
-                then do
-                    let lines' = lines []
-                    if start < bsLen
-                        then do
-                            let rest = SU.unsafeDrop start bs
-                            return $ C.StateDone (Just rest) lines'
-                        else return $ C.StateDone Nothing lines'
-                -- more headers
-                else do
-                    let len' = len + start
-                        lines' = lines . (:) line
-                    if start < bsLen
-                        then do
-                            let more = SU.unsafeDrop start bs
-                            takeHeadersPush (THStatus len' lines' id) more
-                        else return $ C.StateProcessing $ THStatus len' lines' id
-  where
-    bsLen = S.length bs
-    mnl = S.elemIndex 10 bs
-{-# INLINE takeHeadersPush #-}
+    push (THStatus len lines prepend) bs
+        -- Too many bytes
+        | len > maxTotalHeaderLength = throwIO OverLargeHeader
+        | otherwise =
+            case mnl of
+                -- No newline find in this chunk.  Add it to the prepend,
+                -- update the length, and continue processing.
+                Nothing ->
+                    let len' = len + bsLen
+                        prepend' = prepend . S.append bs
+                        status = THStatus len' lines prepend'
+                     in C.NeedInput (push status) close
+                -- Found a newline at position end.
+                Just end ->
+                    let start = end + 1 -- start of next chunk
+                        line
+                            -- There were some bytes before the newline, get them
+                            | end > 0 = prepend $ SU.unsafeTake (checkCR bs end) bs
+                            -- No bytes before the newline
+                            | otherwise = prepend S.empty
+                     in if S.null line
+                            -- no more headers
+                            then
+                                let lines' = lines []
+                                    -- leftover
+                                    rest = if start < bsLen
+                                               then Just (SU.unsafeDrop start bs)
+                                               else Nothing
+                                 in C.Done rest lines'
+                            -- more headers
+                            else
+                                let len' = len + start
+                                    lines' = lines . (line:)
+                                    status = THStatus len' lines' id
+                                 in if start < bsLen
+                                        -- more bytes in this chunk, push again
+                                        then let bs' = SU.unsafeDrop start bs
+                                              in push status bs'
+                                        -- no more bytes in this chunk, ask for more
+                                        else C.NeedInput (push status) close
+      where
+        bsLen = S.length bs
+        mnl = S.elemIndex 10 bs
+{-# INLINE takeHeaders #-}
 
 checkCR :: ByteString -> Int -> Int
 checkCR bs pos =
@@ -758,7 +774,7 @@ proxyPlain upstream th conn mgr req = do
         let portStr = case (serverPort req, isSecure req) of
                            (80, False) -> mempty
                            (443, True) -> mempty
-                           (n, _) -> fromString (":" ++ show n)
+                           (n, _) -> fromString (':' : show n)
             urlStr = (if isSecure req then "https://" else "http://")
                                `mappend` serverName req
                                `mappend` portStr
@@ -770,7 +786,7 @@ proxyPlain upstream th conn mgr req = do
                     -- RFC2616: Connection defaults to Close in HTTP/1.0 and Keep-Alive in HTTP/1.1
                     defaultClose = httpVersion req == H.HttpVersion 1 0
                 in  fromMaybe defaultClose mClose
-            outHdrs = [(n,v) | (n,v) <- requestHeaders req, not $ n `elem` [ "Host", "Accept-Encoding", "Content-Length" ]]
+            outHdrs = [(n,v) | (n,v) <- requestHeaders req, n `notElem` [ "Host", "Accept-Encoding", "Content-Length" ]]
         -- liftIO $ putStrLn $ B.unpack (requestMethod req) ++ " " ++ B.unpack urlStr
         let contentLength = if requestMethod req == "GET"
              then 0
@@ -793,20 +809,20 @@ proxyPlain upstream th conn mgr req = do
                      , HC.rawBody = True
                      , HC.secure = isSecure req
                      , HC.requestBody = HC.RequestBodySource contentLength
-                                            $ fmap copyByteString
-                                            $ requestBody req
+                                      $ fmap2 copyByteString
+                                      $ requestBody req
                      , HC.proxy = proxy
                      -- In a proxy we do not want to intercept non-2XX status codes.
                      , HC.checkStatus = \ _ _ -> Nothing
                      })
                 <$> lift (HC.parseUrl (B.unpack urlStr))
 
-        HC.Response sc rh bodySource <- HC.http url mgr
-        close' <- handleHttpReply close sc rh
+        HC.Response sc hver rh bodySource <- HC.http url mgr
+        close' <- handleHttpReply close sc hver rh
         bodySource C.$$ connSink conn th
         return $ not close'
       where
-        handleHttpReply close status hdrs = do
+        handleHttpReply close status hversion hdrs = do
             let remoteClose = isNothing ("content-length" `lookup` hdrs)
                 close' = close || remoteClose
                 hdrs' = [(n, v) | (n, v) <- hdrs, n `notElem`
@@ -814,7 +830,7 @@ proxyPlain upstream th conn mgr req = do
                         ]
                           ++ [("Connection", if close' then "Close" else "Keep-Alive")]
             liftIO $ connSendMany conn $ L.toChunks $ toLazyByteString $
-                            headers (httpVersion req) status hdrs' False
+                            headers hversion status hdrs' False
             return remoteClose
 
 failRequest :: T.Handle -> Connection -> Request -> ByteString -> ByteString -> ResourceT IO Bool
@@ -835,17 +851,15 @@ proxyConnect th tm conn host prt req = do
             return $ Left $ "Unable to connect: " `mappend` B.pack (show exc)
         case eConn of
             Right uconn -> do
-                fromUpstream <- C.bufferSource $ connSource uconn th
                 liftIO $
                     connSendMany conn $ L.toChunks $ toLazyByteString
                                       $ headers (httpVersion req) statusConnectOK [] False
-                void $ with (forkIO $ do
+                void $ allocate (forkIO $ do
                             wrTh <- T.registerKillThread tm
-                            runResourceT (fromUpstream C.$$ connSink conn wrTh)
+                            runResourceT (connSource uconn th C.$$ connSink conn wrTh)
                             T.cancel wrTh
                         ) killThread
-                fromClient <- C.bufferSource $ connSource conn th
-                fromClient C.$$ connSink uconn th
+                connSource conn th C.$$ connSink uconn th
                 return False
             Left errorMsg ->
                 failRequest th conn req errorMsg ("PROXY FAILURE\r\n" `mappend` errorMsg)
