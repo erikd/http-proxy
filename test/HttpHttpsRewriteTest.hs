@@ -36,8 +36,8 @@ httpToHttpsRewriteTest = runResourceT $ do
     U.printTestMsgR "Rewrite HTTP to HTTPS test"
 
     -- Don't need to do anything with these ThreadIds
-    _ <- with (forkIO $ runTestServerTLS U.testServerPort) killThread
-    _ <- with (forkIO $ runProxySettings proxySettings) killThread
+    _ <- allocate (forkIO $ runTestServerTLS U.testServerPort) killThread
+    _ <- allocate (forkIO $ runProxySettings proxySettings) killThread
     mapM_ (testSingleUrl debug) tests
     U.printPassR
   where

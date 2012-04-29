@@ -55,8 +55,8 @@ basicTest :: IO ()
 basicTest = runResourceT $ do
     printTestMsgR "Basic tests"
     -- Don't need to do anything with these ThreadIds
-    _ <- with (forkIO $ runTestServer testServerPort) killThread
-    _ <- with (forkIO $ runProxySettings testProxySettings) killThread
+    _ <- allocate (forkIO $ runTestServer testServerPort) killThread
+    _ <- allocate (forkIO $ runProxySettings testProxySettings) killThread
     mapM_ (testSingleUrl debug) tests
     printPassR
   where
@@ -76,8 +76,8 @@ basicTest = runResourceT $ do
 streamingTest :: IO ()
 streamingTest = runResourceT $ do
     -- Don't need to do anything with these ThreadIds
-    _ <- with (forkIO $ runTestServer testServerPort) killThread
-    _ <- with (forkIO $ runProxySettings testProxySettings) killThread
+    _ <- allocate (forkIO $ runTestServer testServerPort) killThread
+    _ <- allocate (forkIO $ runProxySettings testProxySettings) killThread
     streamingGetTest  1000 $ "http://localhost:" ++ show testServerPort
     streamingPostTest 1000 $ "http://localhost:" ++ show testServerPort ++ "/large-post"
     streamingGetTest  hugeLen $ "http://localhost:" ++ show testServerPort
@@ -91,7 +91,7 @@ streamingTest = runResourceT $ do
 
 streamingGetTest :: Int64 -> String -> ResourceT IO ()
 streamingGetTest size url = do
-    opSizeMsgR "GET " size
+    operationSizeMsgR "GET " size
     request <-
             (\r -> r { HC.checkStatus = \ _ _ -> Nothing })
                 <$> lift (HC.parseUrl $ url ++ "/large-get?" ++ show size)
@@ -99,9 +99,9 @@ streamingGetTest size url = do
     printPassR
 
 
-httpCheckGetBodySize :: HC.Request IO -> ResourceT IO ()
+httpCheckGetBodySize :: HC.Request (ResourceT IO) -> ResourceT IO ()
 httpCheckGetBodySize req = liftIO $ HC.withManager $ \mgr -> do
-    HC.Response st hdrs bdy <- HC.http req mgr
+    HC.Response st _ hdrs bdy <- HC.http req mgr
     when (st /= HT.status200) $
         error $ "httpCheckGetBodySize : Bad status code : " ++ show st
     let contentLength = readDecimal_ $ fromMaybe "0" $ lookup "content-length" hdrs
@@ -113,7 +113,7 @@ httpCheckGetBodySize req = liftIO $ HC.withManager $ \mgr -> do
 
 streamingPostTest :: Int64 -> String -> ResourceT IO ()
 streamingPostTest size url = do
-    opSizeMsgR "POST" size
+    operationSizeMsgR "POST" size
     request <-
             (\r -> r { HC.method = "POST"
                      , HC.requestBody = requestBodySource size
@@ -124,10 +124,9 @@ streamingPostTest size url = do
     httpCheckPostResponse size $ HC.addProxy "localhost" testProxyPort request
     printPassR
 
-
-httpCheckPostResponse :: Int64 -> HC.Request IO -> ResourceT IO ()
+httpCheckPostResponse :: Int64 -> HC.Request (ResourceT IO) -> ResourceT IO ()
 httpCheckPostResponse postLen req = liftIO $ HC.withManager $ \mgr -> do
-    HC.Response st _ bdy <- HC.http req mgr
+    HC.Response st _ _ bdy <- HC.http req mgr
     when (st /= HT.status200) $
         error $ "httpCheckGetBodySize : Bad status code : " ++ show st
     bodyText <- bdy $$ CB.take 1024
@@ -139,11 +138,11 @@ httpCheckPostResponse postLen req = liftIO $ HC.withManager $ \mgr -> do
 
 --------------------------------------------------------------------------------
 
-requestBodySource :: Int64 -> HC.RequestBody IO
+requestBodySource :: MonadIO m => Int64 -> HC.RequestBody m
 requestBodySource len =
     HC.RequestBodySource len $ DC.sourceState 0 run
   where
-    run :: MonadIO m => Int64 -> ResourceT m (DC.SourceStateResult Int64 Builder)
+    run :: MonadIO m => Int64 -> m (DC.SourceStateResult Int64 Builder)
     run count
         | count >= len = return DC.StateClosed
         | len - count > blockSize64 =
@@ -163,10 +162,10 @@ requestBodySource len =
 warpTlsTest :: IO ()
 warpTlsTest = runResourceT $ do
     printTestMsgR "Test Warp with TLS"
-    _ <- with (forkIO $ runTestServerTLS testServerPort) killThread
+    _ <- allocate (forkIO $ runTestServerTLS testServerPort) killThread
     let url = "https://localhost:" ++ show testServerPort ++ "/"
     request <- lift $ HC.parseUrl url
-    direct@(Result _ hdrs _) <- httpRun request
+    direct@(Result _ _ hdrs _) <- httpRun request
     let isWarp =
             case lookup "server" hdrs of
                 Just s -> BS.isPrefixOf "Warp" s
@@ -180,8 +179,8 @@ httpsConnectTest :: IO ()
 httpsConnectTest = runResourceT $ do
     printTestMsgR "HTTPS CONNECT test"
     -- Don't need to do anything with these ThreadIds
-    _ <- with (forkIO $ runTestServerTLS testServerPort) killThread
-    _ <- with (forkIO $ runProxySettings testProxySettings) killThread
+    _ <- allocate (forkIO $ runTestServerTLS testServerPort) killThread
+    _ <- allocate (forkIO $ runProxySettings testProxySettings) killThread
     mapM_ (testSingleUrl debug) tests
     printPassR
   where

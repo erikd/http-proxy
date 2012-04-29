@@ -9,12 +9,13 @@
 
 module Util where
 
+import Blaze.ByteString.Builder
 import Control.Monad.Trans.Resource
 import Network.TLS
 import System.IO
 
 import Control.Monad (forM_, when, unless)
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (liftIO, MonadIO)
 import Data.ByteString (ByteString)
 import Data.Conduit (($$))
 import Data.Int (Int64)
@@ -23,6 +24,7 @@ import Data.String (fromString)
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.CaseInsensitive as CI
+import qualified Data.Conduit as DC
 import qualified Data.Conduit.Binary as CB
 import qualified Network.HTTP.Conduit as HC
 import qualified Network.HTTP.Types as HT
@@ -91,11 +93,11 @@ headerShow headers =
 
 --------------------------------------------------------------------------------
 
-data Result = Result Int [HT.Header] ByteString
+data Result = Result Int HT.HttpVersion [HT.Header] ByteString
 
 
 printResult :: Result -> IO ()
-printResult (Result status headers body) = do
+printResult (Result status _ headers body) = do
     putStrLn $ "Status : " ++ show status
     putStrLn "Headers :"
     BS.putStr $ headerShow headers
@@ -109,8 +111,8 @@ printTestMsgR str = liftIO $ do
     putStr $ "    " ++ (take 45 (str ++ replicate 45 ' ')) ++ ": "
     hFlush stdout
 
-opSizeMsgR :: String -> Int64 -> ResourceT IO ()
-opSizeMsgR op size =
+operationSizeMsgR :: String -> Int64 -> ResourceT IO ()
+operationSizeMsgR op size =
     printTestMsgR $ "Testing " ++ op ++ " operation  (" ++ show size ++ " bytes)"
 
 printPassR :: ResourceT IO ()
@@ -118,14 +120,14 @@ printPassR = liftIO $ putStrLn "pass"
 
 --------------------------------------------------------------------------------
 
-withManagerSettings :: ResourceIO m => HC.ManagerSettings -> (HC.Manager -> ResourceT m a) -> m a
+withManagerSettings :: HC.ManagerSettings -> (HC.Manager -> ResourceT IO a) -> IO a
 withManagerSettings settings f = runResourceT $ do
-    (_, manager) <- withIO (HC.newManager settings) HC.closeManager
+    (_, manager) <- allocate (HC.newManager settings) HC.closeManager
     f manager
 
 -- | Compare results and error out if they're different.
 compareResult :: Result -> Result -> ResourceT IO ()
-compareResult (Result sa ha ba) (Result sb hb bb) = liftIO $ do
+compareResult (Result sa _ ha ba) (Result sb _ hb bb) = liftIO $ do
     assert (sa == sb) $ "HTTP status codes don't match : " ++ show sa ++ " /= " ++ show sb
     forM_ [ "server", "content-type", "content-length" ] $ \v ->
         let xa = lookup v ha
@@ -163,13 +165,47 @@ setupRequest (method, url, reqBody) = do
 
 -- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
 -- Response contains a Source which was need to read to generate our result.
-httpRun :: HC.Request IO -> ResourceT IO Result
+httpRun :: HC.Request (ResourceT IO) -> ResourceT IO Result
 httpRun req = liftIO $ withManagerSettings settings $ \mgr -> do
-    HC.Response st hdrs bdy <- HC.http req mgr
+    HC.Response st hver hdrs bdy <- HC.http req mgr
     bodyText <- bdy $$ CB.take 8192
-    return $ Result (HT.statusCode st) hdrs $ BS.concat $ LBS.toChunks bodyText
+    return $ Result (HT.statusCode st) hver hdrs $ BS.concat $ LBS.toChunks bodyText
   where
     settings = HC.def { HC.managerCheckCerts = \ _ _ -> return CertificateUsageAccept }
 
 
 
+
+byteSource :: Int64 -> DC.Source (ResourceT IO) (DC.Flush Builder)
+byteSource bytes = DC.sourceState 0 go
+  where
+    go :: MonadIO m => Int64 -> ResourceT m (DC.SourceStateResult Int64 (DC.Flush Builder))
+    go count
+        | count >= bytes = return DC.StateClosed
+        | bytes - count > blockSize64 =
+            return $ DC.StateOpen (count + blockSize64) $ DC.Chunk bbytes
+        | otherwise =
+            let n = bytes - count
+            in return   $ DC.StateOpen (count + n)
+                        $ DC.Chunk $ fromByteString $ BS.take blockSize bsbytes
+
+    blockSize = 8192
+    blockSize64 = fromIntegral blockSize :: Int64
+    bsbytes = BS.replicate blockSize '?'
+    bbytes = fromByteString bsbytes
+
+
+byteSink :: Int64 -> DC.Sink ByteString (ResourceT IO) ()
+byteSink bytes =
+    DC.sinkState 0 sink close
+  where
+    sink :: Int64 -> ByteString -> ResourceT IO (DC.SinkStateResult Int64 ByteString ())
+    sink count bs =
+        if BS.null bs
+            then return $ DC.StateDone Nothing ()
+            else return $ DC.StateProcessing (count + fromIntegral (BS.length bs))
+
+    close :: Int64 -> ResourceT IO ()
+    close count =
+        when (count /= bytes) $
+            error $ "httpCheckGetBodySize : Body length " ++ show count ++ " should have been " ++ show bytes

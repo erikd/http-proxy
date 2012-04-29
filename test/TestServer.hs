@@ -10,7 +10,6 @@
 module TestServer
     ( runTestServer
     , runTestServerTLS
-    , byteSink
     ) where
 
 import Blaze.ByteString.Builder
@@ -21,8 +20,6 @@ import Network.Wai
 import Network.Wai.Handler.Warp
 import Network.Wai.Handler.WarpTLS
 
-import Control.Monad (when)
-import Control.Monad.IO.Class (MonadIO)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lex.Integral (readDecimal_)
 import Data.Conduit (($$))
@@ -77,7 +74,6 @@ serverApp req
             then largePostLenZero
             else largePostCheck len $ requestBody req
 
-
  | otherwise = do
     let text = BS.concat
             [ "  Method          : " , requestMethod req , "\n"
@@ -115,7 +111,7 @@ largePostLenZero = do
     return $ responseBS status400 respHeaders text
 
 
-largePostCheck :: Int64 -> DC.Source IO ByteString -> ResourceT IO Response
+largePostCheck :: Int64 -> DC.Source (ResourceT IO) ByteString -> ResourceT IO Response
 largePostCheck len rbody = do
     rbody $$ byteSink len
     let text = BS.pack $ "Post-size:" ++ show len
@@ -125,38 +121,3 @@ largePostCheck len rbody = do
             ]
     return $ responseBS status200 respHeaders text
 
---------------------------------------------------------------------------------
-
-byteSource :: (MonadIO m, Resource m) => Int64 -> DC.Source m (DC.Flush Builder)
-byteSource bytes = DC.sourceState 0 go
-  where
-    go :: MonadIO m => Int64 -> ResourceT m (DC.SourceStateResult Int64 (DC.Flush Builder))
-    go count
-        | count >= bytes = return DC.StateClosed
-        | bytes - count > blockSize64 =
-            return $ DC.StateOpen (count + blockSize64) $ DC.Chunk bbytes
-        | otherwise =
-            let n = bytes - count
-            in return   $ DC.StateOpen (count + n)
-                        $ DC.Chunk $ fromByteString $ BS.take blockSize bsbytes
-
-    blockSize = 8192
-    blockSize64 = fromIntegral blockSize :: Int64
-    bsbytes = BS.replicate blockSize '?'
-    bbytes = fromByteString bsbytes
-
-
-byteSink :: Resource m => Int64 -> DC.Sink ByteString m ()
-byteSink bytes =
-    DC.sinkState 0 sink close
-  where
-    sink :: Resource m => Int64 -> ByteString -> ResourceT m (DC.SinkStateResult Int64 ByteString ())
-    sink count bs =
-        if BS.null bs
-            then return $ DC.StateDone Nothing ()
-            else return $ DC.StateProcessing (count + fromIntegral (BS.length bs))
-
-    close :: Resource m => Int64 -> ResourceT m ()
-    close count =
-        when (count /= bytes) $
-            error $ "httpCheckGetBodySize : Body length " ++ show count ++ " should have been " ++ show bytes
