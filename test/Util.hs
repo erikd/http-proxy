@@ -164,11 +164,13 @@ setupRequest (method, url, reqBody) = do
 
 
 -- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
--- Response contains a Source which was need to read to generate our result.
+-- Response contains a Source which we need to read to generate our result.
 httpRun :: HC.Request (ResourceT IO) -> ResourceT IO Result
 httpRun req = liftIO $ withManagerSettings settings $ \mgr -> do
-    HC.Response st hver hdrs bdy <- HC.http req mgr
+    HC.Response st hver hdrs bdyRes <- HC.http req mgr
+    (bdy, _finalizer) <- DC.unwrapResumable bdyRes
     bodyText <- bdy $$ CB.take 8192
+    -- finalizer
     return $ Result (HT.statusCode st) hver hdrs $ BS.concat $ LBS.toChunks bodyText
   where
     settings = HC.def { HC.managerCheckCerts = \ _ _ -> return CertificateUsageAccept }
@@ -177,17 +179,18 @@ httpRun req = liftIO $ withManagerSettings settings $ \mgr -> do
 
 
 byteSource :: Int64 -> DC.Source (ResourceT IO) (DC.Flush Builder)
-byteSource bytes = DC.sourceState 0 go
+byteSource bytes = loop 0
   where
-    go :: MonadIO m => Int64 -> ResourceT m (DC.SourceStateResult Int64 (DC.Flush Builder))
-    go count
-        | count >= bytes = return DC.StateClosed
-        | bytes - count > blockSize64 =
-            return $ DC.StateOpen (count + blockSize64) $ DC.Chunk bbytes
-        | otherwise =
-            let n = bytes - count
-            in return   $ DC.StateOpen (count + n)
-                        $ DC.Chunk $ fromByteString $ BS.take blockSize bsbytes
+    loop :: MonadIO m => Int64 -> DC.Source m (DC.Flush Builder)
+    loop count
+        | count >= bytes = return ()
+        | bytes - count > blockSize64 = do
+            DC.yield $ DC.Chunk bbytes
+            loop $ count + blockSize64
+        | otherwise = do
+            let n = fromIntegral $ bytes - count
+            DC.yield $ DC.Chunk $ fromByteString $ BS.take n bsbytes
+            return ()
 
     blockSize = 8192
     blockSize64 = fromIntegral blockSize :: Int64
@@ -196,16 +199,16 @@ byteSource bytes = DC.sourceState 0 go
 
 
 byteSink :: Int64 -> DC.Sink ByteString (ResourceT IO) ()
-byteSink bytes =
-    DC.sinkState 0 sink close
+byteSink bytes = sink 0
   where
-    sink :: Int64 -> ByteString -> ResourceT IO (DC.SinkStateResult Int64 ByteString ())
-    sink count bs =
-        if BS.null bs
-            then return $ DC.StateDone Nothing ()
-            else return $ DC.StateProcessing (count + fromIntegral (BS.length bs))
+    -- sink :: Int64 -> ByteString -> ResourceT IO (DC.SinkStateResult Int64 ByteString ())
+    sink count = do
+        mbs <- DC.await
+        case mbs of
+            Nothing -> close count
+            Just bs -> sink (count + fromIntegral (BS.length bs))
 
-    close :: Int64 -> ResourceT IO ()
+    close :: Monad m => Int64 -> DC.Pipe l0 i0 o0 u0 m ()
     close count =
         when (count /= bytes) $
             error $ "httpCheckGetBodySize : Body length " ++ show count ++ " should have been " ++ show bytes

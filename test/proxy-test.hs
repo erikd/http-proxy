@@ -101,13 +101,15 @@ streamingGetTest size url = do
 
 httpCheckGetBodySize :: HC.Request (ResourceT IO) -> ResourceT IO ()
 httpCheckGetBodySize req = liftIO $ HC.withManager $ \mgr -> do
-    HC.Response st _ hdrs bdy <- HC.http req mgr
+    HC.Response st _ hdrs bdyR <- HC.http req mgr
     when (st /= HT.status200) $
         error $ "httpCheckGetBodySize : Bad status code : " ++ show st
     let contentLength = readDecimal_ $ fromMaybe "0" $ lookup "content-length" hdrs
     when (contentLength == (0 :: Int64)) $
         error "httpCheckGetBodySize : content-length is zero."
+    (bdy, finalizer) <- DC.unwrapResumable bdyR
     bdy $$ byteSink contentLength
+    finalizer
 
 --------------------------------------------------------------------------------
 
@@ -126,10 +128,12 @@ streamingPostTest size url = do
 
 httpCheckPostResponse :: Int64 -> HC.Request (ResourceT IO) -> ResourceT IO ()
 httpCheckPostResponse postLen req = liftIO $ HC.withManager $ \mgr -> do
-    HC.Response st _ _ bdy <- HC.http req mgr
+    HC.Response st _ _ bodyR <- HC.http req mgr
     when (st /= HT.status200) $
         error $ "httpCheckGetBodySize : Bad status code : " ++ show st
+    (bdy, finalizer) <- DC.unwrapResumable bodyR
     bodyText <- bdy $$ CB.take 1024
+    finalizer
     let len = case BS.split ':' (BS.concat (LBS.toChunks bodyText)) of
                 ["Post-size", size] -> readDecimal_ $ BS.dropWhile isSpace size
                 _ -> error "httpCheckPostResponse : Not able to read Post-size."
@@ -140,16 +144,18 @@ httpCheckPostResponse postLen req = liftIO $ HC.withManager $ \mgr -> do
 
 requestBodySource :: MonadIO m => Int64 -> HC.RequestBody m
 requestBodySource len =
-    HC.RequestBodySource len $ DC.sourceState 0 run
+    HC.RequestBodySource len $ loop 0
   where
-    run :: MonadIO m => Int64 -> m (DC.SourceStateResult Int64 Builder)
-    run count
-        | count >= len = return DC.StateClosed
-        | len - count > blockSize64 =
-            return $ DC.StateOpen (count + blockSize64) bbytes
-        | otherwise =
-            let n = len - count
-            in return $ DC.StateOpen (count + n) $ fromByteString $ BS.take blockSize bsbytes
+    loop :: MonadIO m => Int64 -> DC.Source m Builder
+    loop count
+        | count >= len = return ()
+        | len - count > blockSize64 = do
+            DC.yield bbytes
+            loop $ count + blockSize64
+        | otherwise = do
+            let n = fromIntegral $ len - count
+            DC.yield $ fromByteString $ BS.take n bsbytes
+            return ()
 
     blockSize = 4096
     blockSize64 = fromIntegral blockSize :: Int64

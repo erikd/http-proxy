@@ -39,13 +39,10 @@ runTestServer port =
 
 
 runTestServerTLS :: Int -> IO ()
-runTestServerTLS port =
+runTestServerTLS port = do
     let settings = defaultSettings { settingsPort = port, settingsHost = "*6" }
-    in runTLS tlsSettings settings serverApp
-
-
-tlsSettings :: TLSSettings
-tlsSettings = TLSSettings "test/certificate.pem" "test/key.pem"
+        tlsSettings = TLSSettings "test/certificate.pem" "test/key.pem"
+    runTLS tlsSettings settings serverApp
 
 --------------------------------------------------------------------------------
 
@@ -54,16 +51,16 @@ serverApp req
  | rawPathInfo req == "/forbidden" = do
     let text = "This is the forbidden message.\n"
     let respHeaders =
-            [ headerContentType "text/plain"
-            , headerContentLength $ fromString $ show $ BS.length text
+            [ (hContentType, "text/plain")
+            , (hContentLength, fromString $ show $ BS.length text)
             ]
     return $ responseBS status403 respHeaders text
 
  | rawPathInfo req == "/large-get" = do
     let len = readDecimal_ $ BS.drop 1 $ rawQueryString req
     let respHeaders =
-            [ headerContentType "text/plain"
-            , headerContentLength $ fromString $ show len
+            [ (hContentType, "text/plain")
+            , (hContentLength, fromString $ show len)
             ]
     return $ ResponseSource status200 respHeaders $ byteSource len
 
@@ -85,11 +82,11 @@ serverApp req
             , "  Secure (SSL)    : " , fromString (show (isSecure req)), "\n"
             , "  Request Headers :\n\n"
             , headerShow (requestHeaders req)
-            , "\n\n"
+            , "\n"
             ]
     let respHeaders =
-            [ headerContentType "text/plain"
-            , headerContentLength $ fromString $ show $ BS.length text
+            [ (hContentType, "text/plain")
+            , (hContentLength, fromString $ show $ BS.length text)
             ]
     return $ responseBS status200 respHeaders text
 
@@ -105,8 +102,8 @@ largePostLenZero :: ResourceT IO Response
 largePostLenZero = do
     let text = "Error : POST Content-Length was either missing or zero.\n"
     let respHeaders =
-                [ headerContentType "text/plain"
-                , headerContentLength $ fromString $ show $ BS.length text
+                [ (hContentType, "text/plain")
+                , (hContentLength, fromString $ show $ BS.length text)
                 ]
     return $ responseBS status400 respHeaders text
 
@@ -116,8 +113,8 @@ largePostCheck len rbody = do
     rbody $$ byteSink len
     let text = BS.pack $ "Post-size:" ++ show len
     let respHeaders =
-            [ headerContentType "text/plain"
-            , headerContentLength $ fromString $ show $ BS.length text
+            [ (hContentType, "text/plain")
+            , (hContentLength, fromString $ show $ BS.length text)
             ]
     return $ responseBS status200 respHeaders text
 
