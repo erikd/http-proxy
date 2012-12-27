@@ -99,7 +99,7 @@ import qualified Data.IORef as I
 import Data.Conduit.Network (bindPort, HostPreference)
 import Data.String (IsString (..))
 import qualified Data.ByteString.Lex.Integral as LI
-import Network.TLS (TLSCertificateUsage (..))
+import Network.TLS (CertificateUsage (..))
 import qualified Data.ByteString.Base64 as B64
 import qualified Network.HTTP.Conduit as HC
 import Data.Maybe (isNothing)
@@ -919,4 +919,4 @@ firstSuccessful (p:ps) = catch p $ \e ->
 
 managerSettingsNoCheck :: HC.ManagerSettings
 managerSettingsNoCheck =
-    HC.def { HC.managerCheckCerts = \ _ _ -> return CertificateUsageAccept }
+    HC.def { HC.managerCheckCerts = \ _ _ _ -> return CertificateUsageAccept }

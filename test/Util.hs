@@ -173,7 +173,7 @@ httpRun req = liftIO $ withManagerSettings settings $ \mgr -> do
     -- finalizer
     return $ Result (HT.statusCode st) hver hdrs $ BS.concat $ LBS.toChunks bodyText
   where
-    settings = HC.def { HC.managerCheckCerts = \ _ _ -> return CertificateUsageAccept }
+    settings = HC.def { HC.managerCheckCerts = \ _ _ _ -> return CertificateUsageAccept }
 
 
 
