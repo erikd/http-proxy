@@ -94,7 +94,7 @@ setupRequest (method, host, port, path, reqBody) = do
                                 Nothing -> HC.requestBody req
             -- In this test program we want to pass error pages back to the test
             -- function so the error output can be compared.
-            , HC.checkStatus = \ _ _ -> Nothing
+            , HC.checkStatus = \ _ _ _ -> Nothing
             }
         , req
             { HC.method = method
@@ -105,7 +105,7 @@ setupRequest (method, host, port, path, reqBody) = do
                                 Nothing -> HC.requestBody req
             -- In this test program we want to pass error pages back to the test
             -- function so the error output can be compared.
-            , HC.checkStatus = \ _ _ -> Nothing
+            , HC.checkStatus = \ _ _ _ -> Nothing
             }
         )
 

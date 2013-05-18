@@ -159,7 +159,7 @@ setupRequest (method, url, reqBody) = do
                             Nothing -> HC.requestBody req
         -- In this test program we want to pass error pages back to the test
         -- function so the error output can be compared.
-        , HC.checkStatus = \ _ _ -> Nothing
+        , HC.checkStatus = \ _ _ _ -> Nothing
         }
 
 
@@ -167,7 +167,9 @@ setupRequest (method, url, reqBody) = do
 -- Response contains a Source which we need to read to generate our result.
 httpRun :: HC.Request (ResourceT IO) -> ResourceT IO Result
 httpRun req = liftIO $ withManagerSettings settings $ \mgr -> do
-    HC.Response st hver hdrs bdyRes <- HC.http req mgr
+    resp <- HC.http req mgr
+    let (st, hver, hdrs, bdyRes) = (HC.responseStatus resp, HC.responseVersion resp, HC.responseHeaders resp, HC.responseBody resp)
+
     (bdy, _finalizer) <- DC.unwrapResumable bdyRes
     bodyText <- bdy $$ CB.take 8192
     -- finalizer
@@ -208,7 +210,7 @@ byteSink bytes = sink 0
             Nothing -> close count
             Just bs -> sink (count + fromIntegral (BS.length bs))
 
-    close :: Monad m => Int64 -> DC.Pipe l0 i0 o0 u0 m ()
+    -- close :: Monad m => Int64 -> DC.Pipe l0 i0 o0 u0 m ()
     close count =
         when (count /= bytes) $
             error $ "httpCheckGetBodySize : Body length " ++ show count ++ " should have been " ++ show bytes

@@ -41,8 +41,8 @@ runTestServer port =
 runTestServerTLS :: Int -> IO ()
 runTestServerTLS port = do
     let settings = defaultSettings { settingsPort = port, settingsHost = "*6" }
-        tlsSettings = TLSSettings "test/certificate.pem" "test/key.pem"
-    runTLS tlsSettings settings serverApp
+        tlsSettings' = tlsSettings "test/certificate.pem" "test/key.pem"
+    runTLS tlsSettings' settings serverApp
 
 --------------------------------------------------------------------------------
 

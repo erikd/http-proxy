@@ -93,7 +93,7 @@ streamingGetTest :: Int64 -> String -> ResourceT IO ()
 streamingGetTest size url = do
     operationSizeMsgR "GET " size
     request <-
-            (\r -> r { HC.checkStatus = \ _ _ -> Nothing })
+            (\r -> r { HC.checkStatus = \ _ _ _ -> Nothing })
                 <$> lift (HC.parseUrl $ url ++ "/large-get?" ++ show size)
     httpCheckGetBodySize $ HC.addProxy "localhost" testProxyPort request
     printPassR
@@ -101,7 +101,8 @@ streamingGetTest size url = do
 
 httpCheckGetBodySize :: HC.Request (ResourceT IO) -> ResourceT IO ()
 httpCheckGetBodySize req = liftIO $ HC.withManager $ \mgr -> do
-    HC.Response st _ hdrs bdyR <- HC.http req mgr
+    resp <- HC.http req mgr
+    let (st, hdrs, bdyR) = (HC.responseStatus resp, HC.responseHeaders resp, HC.responseBody resp)
     when (st /= HT.status200) $
         error $ "httpCheckGetBodySize : Bad status code : " ++ show st
     let contentLength = readDecimal_ $ fromMaybe "0" $ lookup "content-length" hdrs
@@ -120,7 +121,7 @@ streamingPostTest size url = do
             (\r -> r { HC.method = "POST"
                      , HC.requestBody = requestBodySource size
                      -- Disable expecptions for non-2XX status codes.
-                     , HC.checkStatus = \ _ _ -> Nothing
+                     , HC.checkStatus = \ _ _ _ -> Nothing
                      })
                 <$> lift (HC.parseUrl url)
     httpCheckPostResponse size $ HC.addProxy "localhost" testProxyPort request
@@ -128,7 +129,8 @@ streamingPostTest size url = do
 
 httpCheckPostResponse :: Int64 -> HC.Request (ResourceT IO) -> ResourceT IO ()
 httpCheckPostResponse postLen req = liftIO $ HC.withManager $ \mgr -> do
-    HC.Response st _ _ bodyR <- HC.http req mgr
+    resp <- HC.http req mgr
+    let (st, bodyR) = (HC.responseStatus resp, HC.responseBody resp)
     when (st /= HT.status200) $
         error $ "httpCheckGetBodySize : Bad status code : " ++ show st
     (bdy, finalizer) <- DC.unwrapResumable bodyR

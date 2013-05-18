@@ -41,7 +41,11 @@ module Network.HTTP.Proxy
     )
 where
 
-import Prelude hiding (catch, lines)
+import Prelude hiding (
+# if __GLASGOW_HASKELL__ < 0706
+    catch,
+#endif
+    lines)
 
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as S
@@ -394,6 +398,7 @@ parseRequest' conn port (firstLine:otherLines) remoteHost' src = do
             , isSecure = False
             , remoteHost = remoteHost'
             , requestBody = rbody
+            , requestBodyLength = ChunkedBody
             , vault = mempty
             }, getSource)
 
@@ -827,13 +832,14 @@ proxyPlain upstream th conn mgr req = do
                                       $ requestBody req
                      , HC.proxy = proxy
                      -- In a proxy we do not want to intercept non-2XX status codes.
-                     , HC.checkStatus = \ _ _ -> Nothing
+                     , HC.checkStatus = \ _ _ _ -> Nothing
                      })
                 <$> lift (HC.parseUrl (B.unpack urlStr))
 
-        HC.Response sc hver rh bodyResSource <- HC.http url mgr
-        close' <- handleHttpReply close sc hver rh
-        (bodySource, _) <- unwrapResumable bodyResSource
+        -- HC.Response sc hver rh bodyResSource
+        resp <- HC.http url mgr
+        close' <- handleHttpReply close (HC.responseStatus resp) (HC.responseVersion resp) (HC.responseHeaders resp)
+        (bodySource, _) <- unwrapResumable $ HC.responseBody resp
         bodySource $$ connSink conn th
         return $ not close'
       where
