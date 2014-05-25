@@ -1,3 +1,6 @@
+*.o
+.cabal-sandbox
+cabal.sandbox.config
 connect-test
 dist
 http-to-https-test

@@ -1,9 +1,9 @@
 TARGETS = proxy request-rewrite-proxy proxy-test
 
-GHC = ghc -Wall -Werror -fwarn-missing-signatures -fwarn-tabs -i:src
+GHC = ghc -Wall -Werror -fwarn-missing-signatures -fwarn-tabs
 
-LIBSRC = $(shell find Network -name \*.hs)
-TESTSRC = $(shell find test -name \*.hs)
+LIBSRC := $(shell find Network -name \*.hs)
+TESTSRC := $(shell find test -name \*.hs)
 
 all : $(TARGETS)
 

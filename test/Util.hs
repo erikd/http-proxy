@@ -48,7 +48,7 @@ dumpWaiRequest req =
             , "HTTP Version    : " , fromString (show (Wai.httpVersion req)) , "\n"
             , "Path Info       : " , Wai.rawPathInfo req , "\n"
             , "Query String    : " , Wai.rawQueryString req , "\n"
-            , "Server Name     : " , Wai.serverName req , "\n"
+            , "Server Name     : " , waiRequestHost req , "\n"
             , "Server Port     : " , fromString (show (Wai.serverPort req)), "\n"
             , "Secure (SSL)    : " , fromString (show (Wai.isSecure req)), "\n"
             , "Remote Host     : " , fromString (show (Wai.remoteHost req)), "\n"
@@ -214,3 +214,6 @@ byteSink bytes = sink 0
     close count =
         when (count /= bytes) $
             error $ "httpCheckGetBodySize : Body length " ++ show count ++ " should have been " ++ show bytes
+
+waiRequestHostPort :: Wai.Request -> (ByteString, Int)
+waiRequestHostPort wreq = maybe "???" id $ lookup (CI.mk "Host") (Wai.requestHeaders req)

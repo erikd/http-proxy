@@ -5,7 +5,7 @@ import Network.HTTP.Proxy
 main :: IO ()
 main = runProxySettings $ defaultSettings
                 { proxyPort = 31081
-                , proxyRequestModifier = secureGoogle
+                , proxyRequestModifier = Just secureGoogle
                 }
 
 -- We can modify the request so that instead of going to unsecured Google
@@ -13,14 +13,10 @@ main = runProxySettings $ defaultSettings
 
 secureGoogle :: Request -> IO Request
 secureGoogle req
- | serverName req == "www.google.com" =
-         return $ req
-                { isSecure = True
-                , serverName = "encrypted.google.com"
-                , serverPort = 443
-                , pathInfo = []
-                , queryString = []
-                , rawQueryString = ""
+    | requestHost req == "www.google.com" =
+        return $ req
+                { requestHost = "encrypted.google.com"
+                , requestPort = 443
                 }
 
- | otherwise = return req
+    | otherwise = return req
