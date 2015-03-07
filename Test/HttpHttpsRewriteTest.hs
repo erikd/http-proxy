@@ -7,13 +7,10 @@
 --
 ---------------------------------------------------------
 
-module HttpHttpsRewriteTest
+module Test.HttpHttpsRewriteTest
     ( httpToHttpsRewriteTest
     )
 where
-
-import Control.Monad.Trans.Resource
-import Network.HTTP.Proxy
 
 import Control.Concurrent (forkIO, killThread)
 import Control.Monad (when)
@@ -23,8 +20,11 @@ import Data.ByteString (ByteString)
 import qualified Network.HTTP.Conduit as HC
 import qualified Network.HTTP.Types as HT
 
-import TestServer
-import qualified Util as U
+import Network.HTTP.Proxy
+
+import Test.TestServer
+import qualified Test.Util as U
+
 
 
 debug :: Bool
@@ -32,42 +32,45 @@ debug = False
 
 
 httpToHttpsRewriteTest :: IO ()
-httpToHttpsRewriteTest = runResourceT $ do
+httpToHttpsRewriteTest = do
     U.printTestMsgR "Rewrite HTTP to HTTPS test"
 
     -- Don't need to do anything with these ThreadIds
-    _ <- allocate (forkIO $ runTestServerTLS U.testServerPort) killThread
-    _ <- allocate (forkIO $ runProxySettings proxySettings) killThread
+    t1 <- forkIO $ runTestServerTLS U.httpTestPort
+    t2 <- forkIO $ runProxySettings proxySettings
     mapM_ (testSingleUrl debug) tests
     U.printPassR
+    killThread t1
+    killThread t2
   where
     proxySettings = defaultSettings
                 { proxyPort = U.testProxyPort
                 , proxyHost = "*6"
-                , proxyRequestModifier = httpsRedirector
+                , proxyRequestModifier = Just httpsRedirector
                 }
     tests =
-        [ ( HT.methodGet,  "localhost", U.testServerPort, "/", Nothing )
-        , ( HT.methodPost, "localhost", U.testServerPort, "/", Nothing )
-        , ( HT.methodPost, "localhost", U.testServerPort, "/", Just "Message\n" )
-        , ( HT.methodGet,  "localhost", U.testServerPort, "/forbidden", Nothing )
+        [ ( HT.methodGet,  "localhost", U.httpTestPort, "/", Nothing )
+        , ( HT.methodPost, "localhost", U.httpTestPort, "/", Nothing )
+        , ( HT.methodPost, "localhost", U.httpTestPort, "/", Just "Message\n" )
+        , ( HT.methodGet,  "localhost", U.httpTestPort, "/forbidden", Nothing )
         ]
     httpsRedirector :: Request -> IO Request
-    httpsRedirector req
+    httpsRedirector _req = error "httpRedirector"
+{-
      | serverName req == "localhost" && not (isSecure req) = do
              return $ req
                     { isSecure = True
-                    , serverPort = U.testServerPort
+                    , serverPort = U.httpTestPort
                     }
 
      | otherwise = return req
-
+-}
 
 --------------------------------------------------------------------------------
 type TestRequest = ( HT.Method, String, Int, String, Maybe ByteString )
 
 
-testSingleUrl :: Bool -> TestRequest -> ResourceT IO ()
+testSingleUrl :: Bool -> TestRequest -> IO ()
 testSingleUrl dbg testreq = do
     (dreq, preq) <- liftIO $ setupRequest testreq
     when dbg $ liftIO $ do
@@ -81,10 +84,10 @@ testSingleUrl dbg testreq = do
     U.compareResult direct proxy
 
 
-setupRequest :: Monad m => TestRequest -> IO (HC.Request m, HC.Request m)
+setupRequest :: TestRequest -> IO (HC.Request, HC.Request)
 setupRequest (method, host, port, path, reqBody) = do
     req <- HC.parseUrl $ "http://" ++ host ++ ":" ++ show port ++ path
-    return $
+    return
         ( req
             { HC.method = method
             , HC.secure = True

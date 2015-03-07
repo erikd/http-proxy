@@ -13,11 +13,14 @@ module Network.HTTP.Proxy.Request
 
     , proxyRequest
     , waiRequest
+    , waiRequestHost
     )
     where
 
 import Data.ByteString.Char8 (ByteString)
+import Data.Maybe
 
+import qualified Data.CaseInsensitive as CI
 import qualified Network.HTTP.Types as HT
 import qualified Network.Wai as Wai
 
@@ -28,7 +31,7 @@ type Port = Int
 data Request = Request
     {
     -- | Request method such as GET.
-       requestMethod :: HT.Method
+      requestMethod :: HT.Method
     -- | HTTP version such as 1.1.
     , httpVersion :: HT.HttpVersion
     -- | The upstream host name.
@@ -46,7 +49,10 @@ data Request = Request
 
 
 proxyRequest :: Wai.Request -> Request
-proxyRequest = undefined
+proxyRequest = error "proxyRequest"
 
 waiRequest :: Request -> Wai.Request
-waiRequest = undefined
+waiRequest = error "waiRequest"
+
+waiRequestHost :: Wai.Request -> ByteString
+waiRequestHost req = fromMaybe "???" $ lookup (CI.mk "Host") (Wai.requestHeaders req)

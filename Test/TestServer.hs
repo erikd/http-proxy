@@ -7,7 +7,7 @@
 --
 ---------------------------------------------------------
 
-module TestServer
+module Test.TestServer
     ( runTestServer
     , runTestServerTLS
     ) where
@@ -27,34 +27,34 @@ import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.Conduit as DC
 
-import Util
+import Test.Util
 
 
 runTestServer :: Int -> IO ()
 runTestServer port =
     let settings = defaultSettings { settingsPort = port, settingsHost = "*6" }
-    in runSettings settings serverApp
-
+    in catchAny (runSettings settings serverApp) $ print
 
 runTestServerTLS :: Int -> IO ()
-runTestServerTLS port = do
+runTestServerTLS port =
     let settings = defaultSettings { settingsPort = port, settingsHost = "*6" }
-        tlsSettings' = tlsSettings "test/certificate.pem" "test/key.pem"
-    runTLS tlsSettings' settings serverApp
+        tlsSettings' = tlsSettings "Test/certificate.pem" "Test/key.pem"
+    in catchAny (runTLS tlsSettings' settings serverApp) $ print
 
 --------------------------------------------------------------------------------
 
-serverApp :: Request -> ResourceT IO Response
-serverApp req
+serverApp :: Request -> (Response -> IO ResponseReceived) -> IO ResponseReceived
+serverApp req respond
  | rawPathInfo req == "/forbidden" = do
     let text = "This is the forbidden message.\n"
     let respHeaders =
             [ (hContentType, "text/plain")
             , (hContentLength, fromString $ show $ BS.length text)
             ]
-    return $ responseBS status403 respHeaders text
+    respond . responseLBS status403 respHeaders $ LBS.fromChunks [text]
 
  | rawPathInfo req == "/large-get" = do
     let len = readDecimal_ $ BS.drop 1 $ rawQueryString req
@@ -62,14 +62,12 @@ serverApp req
             [ (hContentType, "text/plain")
             , (hContentLength, fromString $ show len)
             ]
-    return $ ResponseSource status200 respHeaders $ byteSource len
+    respond . responseStream status200 respHeaders $ streamingByteSource len
 
  | rawPathInfo req == "/large-post"
     && requestMethod req == "POST" = do
         let len = readDecimal_ $ fromMaybe "0" $ lookup "content-length" $ requestHeaders req :: Int64
-        if len == 0
-            then largePostLenZero
-            else largePostCheck len $ requestBody req
+        error $ if len == 0 then "serverApp #3" else "serverApp #4"
 
  | otherwise = do
     let text = BS.concat
@@ -77,8 +75,8 @@ serverApp req
             , "  HTTP Version    : " , fromString (show (httpVersion req)) , "\n"
             , "  Path Info       : " , rawPathInfo req , "\n"
             , "  Query String    : " , rawQueryString req , "\n"
-            , "  Server Name     : " , serverName req , "\n"
-            , "  Server Port     : " , fromString (show (serverPort req)), "\n"
+          --, "  Server Name     : " , serverName req , "\n"
+          --, "  Server Port     : " , fromString (show (serverPort req)), "\n"
             , "  Secure (SSL)    : " , fromString (show (isSecure req)), "\n"
             , "  Request Headers :\n\n"
             , headerShow (requestHeaders req)
@@ -88,14 +86,24 @@ serverApp req
             [ (hContentType, "text/plain")
             , (hContentLength, fromString $ show $ BS.length text)
             ]
-    return $ responseBS status200 respHeaders text
+    respond . responseLBS status200 respHeaders $ LBS.fromChunks [text]
 
+streamingByteSource :: Int -> (Builder -> IO ()) -> IO () -> IO ()
+streamingByteSource len write flush =
+    let loop remaining
+            | remaining > 0 = do
+                let current = min 2048 remaining
+                write . fromByteString $ BS.replicate current 'a'
+                flush
+                loop (remaining - current)
+            | otherwise = return ()
+    in loop len
 
 -- Network.Wai provides a responseLBS (build a response from a lazy ByteString).
 -- In this case we had a strict ByteString so I modified responseLBS to
 -- produce this version.
 responseBS :: Status -> ResponseHeaders -> ByteString -> Response
-responseBS s h = ResponseBuilder s h . fromByteString
+responseBS s h = error "responsBS" -- ResponseBuilder s h . fromByteString
 
 
 largePostLenZero :: ResourceT IO Response

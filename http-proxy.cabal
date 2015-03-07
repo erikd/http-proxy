@@ -30,14 +30,22 @@ Library
                    , async                   >= 2.0
                    , blaze-builder           >= 0.3
                    , bytestring              >= 0.10
+                   , bytestring-lexing       >= 0.4
                    , case-insensitive        >= 1.2
                    , conduit                 >= 1.2
                    , conduit-extra           >= 1.1
+                   , hspec                   >= 2.1
+                   , http-client             >= 0.4
                    , http-conduit            >= 2.1
                    , http-types              >= 0.8
+                   , mtl                     >= 2.1
+                   , resourcet               >= 1.1
                    , tls                     >= 1.2
+                   , transformers            >= 0.3
                    , wai                     >= 3.0
+                   , wai-conduit             >= 3.0
                    , warp                    >= 3.0
+                   , warp-tls                >= 3.0
 
   Exposed-modules:   Network.HTTP.Proxy
   Other-modules:     Network.HTTP.Proxy.Request

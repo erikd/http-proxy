@@ -7,19 +7,20 @@
 --
 ---------------------------------------------------------
 
-module Util where
+module Test.Util where
 
 import Blaze.ByteString.Builder
 import Control.Monad.Trans.Resource
-import Network.TLS
 import System.IO
+import Control.Concurrent.Async
+import Control.Exception
 
 import Control.Monad (forM_, when, unless)
-import Control.Monad.IO.Class (liftIO, MonadIO)
+import Control.Monad.IO.Class (MonadIO)
 import Data.ByteString (ByteString)
-import Data.Conduit (($$))
 import Data.Int (Int64)
 import Data.String (fromString)
+import Network.Connection
 
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
@@ -30,14 +31,16 @@ import qualified Network.HTTP.Conduit as HC
 import qualified Network.HTTP.Types as HT
 import qualified Network.Wai as Wai
 
+import Network.HTTP.Proxy.Request
+
 
 type TestRequest = ( HT.Method, String, Maybe ByteString )
 
 
-testProxyPort, testServerPort :: Int
-testProxyPort = 31081
-testServerPort = 31080
-
+testProxyPort, httpTestPort, httpsTestPort :: Int
+testProxyPort = 31000
+httpTestPort = 31080
+httpsTestPort = 31443
 
 
 dumpWaiRequest :: Wai.Request -> IO ()
@@ -49,7 +52,7 @@ dumpWaiRequest req =
             , "Path Info       : " , Wai.rawPathInfo req , "\n"
             , "Query String    : " , Wai.rawQueryString req , "\n"
             , "Server Name     : " , waiRequestHost req , "\n"
-            , "Server Port     : " , fromString (show (Wai.serverPort req)), "\n"
+        --  , "Server Port     : " , fromString (show (Wai.serverPort req)), "\n"
             , "Secure (SSL)    : " , fromString (show (Wai.isSecure req)), "\n"
             , "Remote Host     : " , fromString (show (Wai.remoteHost req)), "\n"
             , "Request Headers :\n"
@@ -58,7 +61,7 @@ dumpWaiRequest req =
     in BS.putStr text
 
 
-dumpHttpConduitRequest :: HC.Request m -> IO ()
+dumpHttpConduitRequest :: HC.Request -> IO ()
 dumpHttpConduitRequest req =
     let text = BS.concat
             [ "------- HttpConduit Request ------------------------------------------------------\n"
@@ -98,58 +101,58 @@ data Result = Result Int HT.HttpVersion [HT.Header] ByteString
 
 printResult :: Result -> IO ()
 printResult (Result status _ headers body) = do
-    putStrLn $ "Status : " ++ show status
-    putStrLn "Headers :"
+    putStrLn $ "Response status : " ++ show status
+    putStrLn "Response headers :"
     BS.putStr $ headerShow headers
-    putStrLn "Body :"
+    putStrLn "Response body :"
     BS.putStrLn body
 
 --------------------------------------------------------------------------------
 
-printTestMsgR :: String -> ResourceT IO ()
-printTestMsgR str = liftIO $ do
-    putStr $ "    " ++ (take 45 (str ++ replicate 45 ' ')) ++ ": "
+printTestMsgR :: String -> IO ()
+printTestMsgR str = do
+    putStr $ "    " ++ take 45 (str ++ replicate 45 ' ') ++ ": "
     hFlush stdout
 
-operationSizeMsgR :: String -> Int64 -> ResourceT IO ()
+operationSizeMsgR :: String -> Int64 -> IO ()
 operationSizeMsgR op size =
     printTestMsgR $ "Testing " ++ op ++ " operation  (" ++ show size ++ " bytes)"
 
-printPassR :: ResourceT IO ()
-printPassR = liftIO $ putStrLn "pass"
+printPassR :: IO ()
+printPassR = putStrLn "pass"
 
 --------------------------------------------------------------------------------
 
-withManagerSettings :: HC.ManagerSettings -> (HC.Manager -> ResourceT IO a) -> IO a
-withManagerSettings settings f = runResourceT $ do
-    (_, manager) <- allocate (HC.newManager settings) HC.closeManager
-    f manager
-
 -- | Compare results and error out if they're different.
-compareResult :: Result -> Result -> ResourceT IO ()
-compareResult (Result sa _ ha ba) (Result sb _ hb bb) = liftIO $ do
+compareResult :: Result -> Result -> IO ()
+compareResult (Result sa _ ha ba) (Result sb _ hb bb) = do
     assert (sa == sb) $ "HTTP status codes don't match : " ++ show sa ++ " /= " ++ show sb
     forM_ [ "server", "content-type", "content-length" ] $ \v ->
-        let xa = lookup v ha
-            xb = lookup v hb
-        in assert (xa == xb) $ "Header field '" ++ show v ++ "' doesn't match : '" ++ show xa ++ "' /= '" ++ show xb
+        assertMaybe (lookup v ha) (lookup v hb) $ \ ja jb ->
+            "Header field '" ++ show v ++ "' doesn't match : '" ++ show ja ++ "' /= '" ++ show jb
     assert (ba == bb) $ "HTTP response bodies are different :\n" ++ BS.unpack ba ++ "\n-----------\n" ++ BS.unpack bb
   where
     assert :: Bool -> String -> IO ()
     assert b msg = unless b $ error msg
 
-testSingleUrl :: Bool -> TestRequest -> ResourceT IO ()
+    assertMaybe :: Eq a => Maybe a -> Maybe a -> (a -> a -> String) -> IO ()
+    assertMaybe Nothing _ _ = return ()
+    assertMaybe _ Nothing _ = return ()
+    assertMaybe (Just a) (Just b) fmsg = unless (a == b) . error $ fmsg a b
+
+
+testSingleUrl :: Bool -> TestRequest -> IO ()
 testSingleUrl debug testreq = do
-    request <- liftIO $ setupRequest testreq
+    request <- setupRequest testreq
     direct <- httpRun request
     proxy <- httpRun $ HC.addProxy "localhost" testProxyPort request
-    when debug $ liftIO $ do
+    when debug $ do
         printResult direct
         printResult proxy
     compareResult direct proxy
 
 
-setupRequest :: Monad m => TestRequest -> IO (HC.Request m)
+setupRequest :: TestRequest -> IO HC.Request
 setupRequest (method, url, reqBody) = do
     req <- HC.parseUrl url
     return $ req
@@ -165,18 +168,17 @@ setupRequest (method, url, reqBody) = do
 
 -- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
 -- Response contains a Source which we need to read to generate our result.
-httpRun :: HC.Request (ResourceT IO) -> ResourceT IO Result
-httpRun req = liftIO $ withManagerSettings settings $ \mgr -> do
+httpRun :: HC.Request -> IO Result
+httpRun req = HC.withManagerSettings settings $ \mgr -> do
     resp <- HC.http req mgr
-    let (st, hver, hdrs, bdyRes) = (HC.responseStatus resp, HC.responseVersion resp, HC.responseHeaders resp, HC.responseBody resp)
-
-    (bdy, _finalizer) <- DC.unwrapResumable bdyRes
-    bodyText <- bdy $$ CB.take 8192
-    -- finalizer
-    return $ Result (HT.statusCode st) hver hdrs $ BS.concat $ LBS.toChunks bodyText
+    (_bdy, finalizer) <- DC.unwrapResumable $ HC.responseBody resp
+    bodyText <- HC.responseBody resp DC.$$+- CB.take 819200000
+    finalizer
+    return $ Result (HT.statusCode $ HC.responseStatus resp)
+                (HC.responseVersion resp) (HC.responseHeaders resp)
+                $ BS.concat $ LBS.toChunks bodyText
   where
-    settings = HC.def { HC.managerCheckCerts = \ _ _ _ -> return CertificateUsageAccept }
-
+    settings = HC.mkManagerSettings (TLSSettingsSimple True False False) Nothing
 
 
 
@@ -215,5 +217,7 @@ byteSink bytes = sink 0
         when (count /= bytes) $
             error $ "httpCheckGetBodySize : Body length " ++ show count ++ " should have been " ++ show bytes
 
-waiRequestHostPort :: Wai.Request -> (ByteString, Int)
-waiRequestHostPort wreq = maybe "???" id $ lookup (CI.mk "Host") (Wai.requestHeaders req)
+
+catchAny :: IO a -> (SomeException -> IO a) -> IO a
+catchAny action onE =
+    withAsync action waitCatch >>= either onE return

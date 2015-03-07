@@ -41,20 +41,18 @@ module Network.HTTP.Proxy
 
 import Blaze.ByteString.Builder (fromByteString)
 import Control.Concurrent.Async (race_)
-import Control.Exception (SomeException, bracket)
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader
-import Control.Monad.Trans.Resource
+import Control.Exception (SomeException)
 import Data.ByteString.Char8 (ByteString)
-import Data.Conduit
-import Data.Conduit.Network (HostPreference)
+import Data.Conduit (Flush (..), Sink, Source, ($$), mapOutput, yield)
+import Data.Conduit.Network
 import Data.Monoid
+import Network.Wai.Conduit hiding (Request)
 
 import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Lazy.Char8 as LBS
-import qualified Data.CaseInsensitive as CI
 import qualified Data.Conduit.Network as NC
-import qualified Network.HTTP.Client.Conduit as HC
+import qualified Network.HTTP.Client as HC
+import qualified Network.HTTP.Conduit as HC
+import qualified Network.HTTP.Client.Conduit as HCC
 import qualified Network.HTTP.Types as HT
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
@@ -77,7 +75,9 @@ runProxy port = runProxySettings $ defaultSettings { proxyPort = port }
 
 -- | Run a HTTP and HTTPS proxy server with the specified settings.
 runProxySettings :: Settings -> IO ()
-runProxySettings set = Warp.runSettings (warpSettings set) proxyAppWrapper
+runProxySettings set = do
+    mgr <- HC.newManager HC.conduitManagerSettings
+    Warp.runSettings (warpSettings set) $ proxyApp mgr
 
 
 -- | Various proxy server settings. This is purposely kept as an abstract data
@@ -132,142 +132,56 @@ defaultSettings = Settings
                 "Something went wrong in the proxy."
 
 
--- class ReaderT Manager m a
-
-proxyAppWrapper :: Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-proxyAppWrapper wreq respond = runResourceT $ proxyApp wreq  respond
+-- -----------------------------------------------------------------------------
 
 
-proxyApp :: (MonadBaseControl IO m, MonadReader env m, HC.HasHttpManager env) => Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> m Wai.ResponseReceived
-proxyApp wreq respond
-    | null $ Wai.requestHeaders wreq = failRequest "Error empty request headers." wreq >>= respond
-
-    | Wai.isSecure wreq = failRequest "Secure connection to proxy?" wreq >>= respond
-
-    | Wai.requestMethod wreq == "CONNECT" = connectApp wreq >>= respond
-
-    | otherwise = do
-            hreq <- httpConduitRequest wreq
-            HC.withManager $ HC.withResponse hreq $ undefined respond
-            {-
-            HC.withResponse hreq $ \ hresp -> liftIO $ respond $
-                Wai.responseStream (HC.responseStatus hresp) (cleanResponseHeaders hresp) undefined
-            -}
-
-{-
-    | otherwise = do
-        hreq <- liftIO $ httpConduitRequest wreq
-        HC.withResponse hreq $ \hresp ->
-            respond $ Wai.responseStream (HC.responseStatus hresp) (cleanResponseHeaders hresp) $ \write flush -> undefined
-
-                -- liftIO $ await >>= maybe (return ()) (\x -> write (fromByteString x) >> flush)
-                        {-
-                        HC.responseBody hreps $ \body
-                        write $ fromByteString "Hello\n"
-                        flush
-                        write $ fromByteString "World\n"
-                        -}
-
-        {-
-        Wai.responseSourceBracket (HC.responseOpen hreq manager) (HC.responseClose) $ \res -> do
-            let body = mapOutput (Chunk . fromByteString) $ HC.bodyReaderSource $ HC.responseBody res
-                headers = filter safeResHeader $ HC.responseHeaders res
-            return (HC.responseStatus res, headers, body)
-        -}
--}
-
-
-wibbler :: (Wai.Response -> IO Wai.ResponseReceived)
-            -> HC.Response (ConduitM i0 ByteString n0 ()) -> m Wai.ResponseReceived
-wibbler = undefined
-
-{-
-wibbler :: MonadIO m => (Response (ConduitM i ByteString n ()) -> m a) -> m a Wai.Response
-wibbler hreq =
-    HC.withResponse hreq $ \ hresp ->
-        Wai.responseStream (HC.responseStatus hresp) (cleanResponseHeaders hresp) $ undefined
--}
-
-cleanResponseHeaders :: HC.Response body -> [(HT.HeaderName, ByteString)]
-cleanResponseHeaders =
-    filter safeResHeader . HC.responseHeaders
+proxyApp :: HC.Manager -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+proxyApp mgr req respond
+ | Wai.requestMethod req == "CONNECT" =
+            respond $ responseRawSource (handleConnect req)
+                    (Wai.responseLBS HT.status500 [("Content-Type", "text/plain")] "No support for responseRaw")
+ | otherwise = do
+    -- print (Wai.rawPathInfo req, Wai.rawQueryString req, Wai.requestHeaders req)
+    let url = Wai.rawPathInfo req `mappend` Wai.rawQueryString req
+    req2' <- HC.parseUrl $ BS.unpack url
+    let req2 = req2'
+            { HC.method = Wai.requestMethod req
+            , HC.requestHeaders = filter safeReqHeader $ Wai.requestHeaders req
+            , HC.requestBody =
+                case Wai.requestBodyLength req of
+                    Wai.ChunkedBody ->
+                        HC.requestBodySourceChunkedIO (sourceRequestBody req)
+                    Wai.KnownLength l ->
+                        HC.requestBodySourceIO (fromIntegral l) (sourceRequestBody req)
+            , HC.decompress = \_ -> True
+            , HC.checkStatus = \_ _ _ -> Nothing
+            }
+    HC.withResponse req2 mgr $ \res -> do
+        let body = mapOutput (Chunk . fromByteString) $ HCC.bodyReaderSource $ HC.responseBody res
+            headers = filter safeResHeader $ HC.responseHeaders res
+        respond $ responseSource (HC.responseStatus res) headers body
   where
-    safeResHeader (k, _) = k `notElem` [] -- FIXME expand
+    safeReqHeader (k, _) = k `elem` -- FIXME expand
+        [ "user-agent"
+        , "accept"
+        , "cookie"
+        ]
+    safeResHeader (k, _) = k `elem` -- FIXME expand
+        [ "content-type"
+        ]
 
-httpConduitRequest :: Wai.Request -> IO HC.Request
-httpConduitRequest wreq = do
-        let url = Wai.rawPathInfo wreq <> Wai.rawQueryString wreq
-        hreq <- HC.parseUrl $ BS.unpack url
-        return $ hreq
-                { HC.method = Wai.requestMethod wreq
-                , HC.requestHeaders = filter safeReqHeader $ Wai.requestHeaders wreq
-                , HC.requestBody =
-                    case Wai.requestBodyLength wreq of
-                        Wai.ChunkedBody -> undefined -- HC.requestBodySourceChunkedIO (Wai.requestBody wreq)
-                        Wai.KnownLength l -> undefined l -- HC.requestBodySourceIO (fromIntegral l) (Wai.requestBody wreq)
-                , HC.decompress = \_ -> True
-                , HC.checkStatus = \_ _ _ -> Nothing
-                }
-      where
-        safeReqHeader (k, _) = k `elem` -- FIXME expand
-            [ "user-agent"
-            , "accept"
-            , "cookie"
-            ]
-
---------------------------------------------------------------------------------
-
-failRequest :: Monad m => ByteString -> Wai.Request -> m Wai.Response
-failRequest msg wreq = do
-    let err =
-            [ msg
-            , "\n"
-            , waiRequestHost wreq
-            , Wai.rawPathInfo wreq
-            , Wai.rawQueryString wreq
-            , "\n"
-            ]
-    let respHeaders =
-            [ ( HT.hContentType, "text/plain" )
-            , ( HT.hContentLength, BS.pack . show . sum $ map BS.length err)
-            ]
-    return $ Wai.responseLBS HT.status400 respHeaders $ LBS.fromChunks err
-
---------------------------------------------------------------------------------
-
-connectApp = undefined
-
-{-
-connectApp :: Wai.Request -> IO Wai.Response
-connectApp wreq =
-    return $ Wai.responseRaw (sslConnect wreq)
-            $ Wai.responseLBS HT.status500 [("Content-Type", "text/plain")] "No support for responseRaw"
-
-sslConnect :: Wai.Request -> Source IO BS.ByteString -> Sink BS.ByteString IO () -> IO ()
-sslConnect wreq fromClient toClient = do
+handleConnect :: Wai.Request -> Source IO BS.ByteString -> Sink BS.ByteString IO () -> IO ()
+handleConnect req fromClient toClient = do
     let (host, port) =
-            case BS.break (== ':') $ Wai.rawPathInfo wreq of
+            case BS.break (== ':') $ Wai.rawPathInfo req of
                 (x, "") -> (x, 80)
                 (x, y) ->
                     case BS.readInt $ BS.drop 1 y of
                         Just (port', _) -> (x, port')
                         Nothing -> (x, 80)
-        settings = NC.clientSettings port host
-    NC.runTCPClient settings $ \ad -> do
+        settings = clientSettings port host
+    runTCPClient settings $ \ad -> do
         yield "HTTP/1.1 200 OK\r\n\r\n" $$ toClient
-        race_ (fromClient $$ NC.appSink ad) (NC.appSource ad $$ toClient)
--}
-
---------------------------------------------------------------------------------
-
-waiRequestHost :: Wai.Request -> ByteString
-waiRequestHost req = maybe "???" id $ lookup (CI.mk "Host") (Wai.requestHeaders req)
-
-{-
-
-requestPort :: Wai.Request -> Port
-requestPort = snd . requestHostPort
-
-requestHostPort :: Wai.Request -> (ByteString, Port)
-requestHostPort = undefined
--}
+        race_
+            (fromClient $$ NC.appSink ad)
+            (NC.appSource ad $$ toClient)

@@ -8,14 +8,13 @@
 ---------------------------------------------------------
 
 import Blaze.ByteString.Builder
-import Control.Monad.Trans.Resource
 import Network.HTTP.Proxy
 
 import Control.Applicative ((<$>))
 import Control.Concurrent (forkIO, killThread)
+import Control.Concurrent.Async
+import Control.Exception
 import Control.Monad (unless, when)
-import Control.Monad.IO.Class (liftIO, MonadIO)
-import Control.Monad.Trans.Class (lift)
 import Data.ByteString.Lex.Integral (readDecimal_)
 import Data.Char (isSpace)
 import Data.Conduit (($$))
@@ -29,9 +28,9 @@ import qualified Data.Conduit.Binary as CB
 import qualified Network.HTTP.Conduit as HC
 import qualified Network.HTTP.Types as HT
 
-import TestServer
-import HttpHttpsRewriteTest
-import Util
+import Test.TestServer
+import Test.HttpHttpsRewriteTest
+import Test.Util
 
 
 hugeLen :: Int64
@@ -52,36 +51,33 @@ main = do
 
 
 basicTest :: IO ()
-basicTest = runResourceT $ do
+basicTest = do
     printTestMsgR "Basic tests"
-    -- Don't need to do anything with these ThreadIds
-    _ <- allocate (forkIO $ runTestServer testServerPort) killThread
-    _ <- allocate (forkIO $ runProxySettings testProxySettings) killThread
-    mapM_ (testSingleUrl debug) tests
-    printPassR
+    withTestServerAndProxy httpTestPort testProxySettings $ do
+        mapM_ (testSingleUrl debug) tests
+        printPassR
   where
     testProxySettings = defaultSettings
                     { proxyHost = "*6"
                     , proxyPort = testProxyPort
                     }
     tests =
-        [ ( HT.methodGet,  "http://localhost:" ++ show testServerPort ++ "/", Nothing )
-        , ( HT.methodPost, "http://localhost:" ++ show testServerPort ++ "/", Nothing )
-        , ( HT.methodPost, "http://localhost:" ++ show testServerPort ++ "/", Just "Message\n" )
-        , ( HT.methodGet,  "http://localhost:" ++ show testServerPort ++ "/forbidden", Nothing )
+        [ ( HT.methodGet,  "http://localhost:" ++ show httpTestPort ++ "/", Nothing )
+        , ( HT.methodPost, "http://localhost:" ++ show httpTestPort ++ "/", Nothing )
+        , ( HT.methodPost, "http://localhost:" ++ show httpTestPort ++ "/", Just "Message\n" )
+        , ( HT.methodGet,  "http://localhost:" ++ show httpTestPort ++ "/forbidden", Nothing )
         ]
 
 --------------------------------------------------------------------------------
 
 streamingTest :: IO ()
-streamingTest = runResourceT $ do
-    -- Don't need to do anything with these ThreadIds
-    _ <- allocate (forkIO $ runTestServer testServerPort) killThread
-    _ <- allocate (forkIO $ runProxySettings testProxySettings) killThread
-    streamingGetTest  1000 $ "http://localhost:" ++ show testServerPort
-    streamingPostTest 1000 $ "http://localhost:" ++ show testServerPort ++ "/large-post"
-    streamingGetTest  hugeLen $ "http://localhost:" ++ show testServerPort
-    streamingPostTest hugeLen $ "http://localhost:" ++ show testServerPort ++ "/large-post"
+streamingTest =
+    withTestServerAndProxy httpTestPort testProxySettings $ do
+        streamingGetTest  1000 $ "http://localhost:" ++ show httpTestPort
+        streamingPostTest 1000 $ "http://localhost:" ++ show httpTestPort ++ "/large-post"
+        streamingGetTest  hugeLen $ "http://localhost:" ++ show httpTestPort
+        streamingPostTest hugeLen $ "http://localhost:" ++ show httpTestPort ++ "/large-post"
+        printPassR
   where
     testProxySettings = Network.HTTP.Proxy.defaultSettings
                     { proxyHost = "*6"
@@ -89,18 +85,18 @@ streamingTest = runResourceT $ do
                     }
 
 
-streamingGetTest :: Int64 -> String -> ResourceT IO ()
+streamingGetTest :: Int64 -> String -> IO ()
 streamingGetTest size url = do
     operationSizeMsgR "GET " size
     request <-
             (\r -> r { HC.checkStatus = \ _ _ _ -> Nothing })
-                <$> lift (HC.parseUrl $ url ++ "/large-get?" ++ show size)
+                <$> HC.parseUrl (url ++ "/large-get?" ++ show size)
     httpCheckGetBodySize $ HC.addProxy "localhost" testProxyPort request
     printPassR
 
 
-httpCheckGetBodySize :: HC.Request (ResourceT IO) -> ResourceT IO ()
-httpCheckGetBodySize req = liftIO $ HC.withManager $ \mgr -> do
+httpCheckGetBodySize :: HC.Request -> IO ()
+httpCheckGetBodySize req = HC.withManager $ \mgr -> do
     resp <- HC.http req mgr
     let (st, hdrs, bdyR) = (HC.responseStatus resp, HC.responseHeaders resp, HC.responseBody resp)
     when (st /= HT.status200) $
@@ -114,7 +110,7 @@ httpCheckGetBodySize req = liftIO $ HC.withManager $ \mgr -> do
 
 --------------------------------------------------------------------------------
 
-streamingPostTest :: Int64 -> String -> ResourceT IO ()
+streamingPostTest :: Int64 -> String -> IO ()
 streamingPostTest size url = do
     operationSizeMsgR "POST" size
     request <-
@@ -123,12 +119,12 @@ streamingPostTest size url = do
                      -- Disable expecptions for non-2XX status codes.
                      , HC.checkStatus = \ _ _ _ -> Nothing
                      })
-                <$> lift (HC.parseUrl url)
+                <$> HC.parseUrl url
     httpCheckPostResponse size $ HC.addProxy "localhost" testProxyPort request
     printPassR
 
-httpCheckPostResponse :: Int64 -> HC.Request (ResourceT IO) -> ResourceT IO ()
-httpCheckPostResponse postLen req = liftIO $ HC.withManager $ \mgr -> do
+httpCheckPostResponse :: Int64 -> HC.Request -> IO ()
+httpCheckPostResponse postLen req = HC.withManager $ \mgr -> do
     resp <- HC.http req mgr
     let (st, bodyR) = (HC.responseStatus resp, HC.responseBody resp)
     when (st /= HT.status200) $
@@ -144,11 +140,12 @@ httpCheckPostResponse postLen req = liftIO $ HC.withManager $ \mgr -> do
 
 --------------------------------------------------------------------------------
 
-requestBodySource :: MonadIO m => Int64 -> HC.RequestBody m
+requestBodySource :: Int64 -> HC.RequestBody
 requestBodySource len =
-    HC.RequestBodySource len $ loop 0
+    error "requestBoddySource" len $ loop 0
+    -- HC.RequestBodyStream len $ loop 0
   where
-    loop :: MonadIO m => Int64 -> DC.Source m Builder
+    loop :: Int64 -> DC.Source IO Builder
     loop count
         | count >= len = return ()
         | len - count > blockSize64 = do
@@ -168,28 +165,27 @@ requestBodySource len =
 --------------------------------------------------------------------------------
 
 warpTlsTest :: IO ()
-warpTlsTest = runResourceT $ do
+warpTlsTest = do
     printTestMsgR "Test Warp with TLS"
-    _ <- allocate (forkIO $ runTestServerTLS testServerPort) killThread
-    let url = "https://localhost:" ++ show testServerPort ++ "/"
-    request <- lift $ HC.parseUrl url
+    th <- forkIO $ runTestServerTLS httpTestPort
+    let url = "https://localhost:" ++ show httpTestPort ++ "/"
+    request <- HC.parseUrl url
     direct@(Result _ _ hdrs _) <- httpRun request
     let isWarp =
             case lookup "server" hdrs of
                 Just s -> BS.isPrefixOf "Warp" s
                 Nothing -> False
     unless isWarp $ error "No 'Server: Warp' header."
-    when debug $ liftIO $ printResult direct
+    when debug $ printResult direct
+    killThread th
     printPassR
 
 
 httpsConnectTest :: IO ()
-httpsConnectTest = runResourceT $ do
+httpsConnectTest = do
     printTestMsgR "HTTPS CONNECT test"
-    -- Don't need to do anything with these ThreadIds
-    _ <- allocate (forkIO $ runTestServerTLS testServerPort) killThread
-    _ <- allocate (forkIO $ runProxySettings testProxySettings) killThread
-    mapM_ (testSingleUrl debug) tests
+    withTestServerAndProxy httpsTestPort testProxySettings $
+        mapM_ (testSingleUrl debug) tests
     printPassR
   where
     testProxySettings = defaultSettings
@@ -197,8 +193,28 @@ httpsConnectTest = runResourceT $ do
                     , proxyPort = testProxyPort
                     }
     tests =
-        [ ( HT.methodGet,  "https://localhost:" ++ show testServerPort ++ "/", Nothing )
-        , ( HT.methodPost, "https://localhost:" ++ show testServerPort ++ "/", Nothing )
-        , ( HT.methodPost, "https://localhost:" ++ show testServerPort ++ "/", Just "Message\n" )
-        , ( HT.methodGet,  "https://localhost:" ++ show testServerPort ++ "/forbidden", Nothing )
+        [ ( HT.methodGet,  "https://localhost:" ++ show httpTestPort ++ "/", Nothing )
+        , ( HT.methodPost, "https://localhost:" ++ show httpTestPort ++ "/", Nothing )
+        , ( HT.methodPost, "https://localhost:" ++ show httpTestPort ++ "/", Just "Message\n" )
+        , ( HT.methodGet,  "https://localhost:" ++ show httpTestPort ++ "/forbidden", Nothing )
         ]
+
+withTestServerAndProxy :: Int -> Settings -> IO a -> IO a
+withTestServerAndProxy httpTestPort testProxySettings action =
+    withAsync (runTestServer httpTestPort) $ \ async1 ->
+        withAsync (runTestProxy testProxySettings) $ \ async2 -> do
+            res <- action
+            cancel async1
+            cancel async2
+            return res
+
+
+runTestProxy :: Settings -> IO ()
+runTestProxy settings =
+    catchAny (runProxySettings settings) $ \ _ -> return ()
+  where
+    tryAny :: IO a -> IO (Either SomeException a)
+    tryAny action = withAsync action waitCatch
+
+    catchAny :: IO a -> (SomeException -> IO a) -> IO a
+    catchAny action onE = tryAny action >>= either onE return
