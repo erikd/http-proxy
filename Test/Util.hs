@@ -13,7 +13,7 @@ import Blaze.ByteString.Builder
 import Control.Monad.Trans.Resource
 import System.IO
 import Control.Concurrent.Async
-import Control.Exception
+import Control.Exception hiding (assert)
 
 import Control.Monad (forM_, when, unless)
 import Control.Monad.IO.Class (MonadIO)
@@ -34,13 +34,17 @@ import qualified Network.Wai as Wai
 import Network.HTTP.Proxy.Request
 
 
+data UriScheme
+    = Http | Https
+    deriving Show
+
 type TestRequest = ( HT.Method, String, Maybe ByteString )
 
 
-testProxyPort, httpTestPort, httpsTestPort :: Int
-testProxyPort = 31000
+httpTestPort, httpsTestPort, testProxyPort :: Int
 httpTestPort = 31080
 httpsTestPort = 31443
+testProxyPort = 31088
 
 
 dumpWaiRequest :: Wai.Request -> IO ()
@@ -51,8 +55,7 @@ dumpWaiRequest req =
             , "HTTP Version    : " , fromString (show (Wai.httpVersion req)) , "\n"
             , "Path Info       : " , Wai.rawPathInfo req , "\n"
             , "Query String    : " , Wai.rawQueryString req , "\n"
-            , "Server Name     : " , waiRequestHost req , "\n"
-        --  , "Server Port     : " , fromString (show (Wai.serverPort req)), "\n"
+            , "Server          : " , waiRequestHost req , "\n"
             , "Secure (SSL)    : " , fromString (show (Wai.isSecure req)), "\n"
             , "Remote Host     : " , fromString (show (Wai.remoteHost req)), "\n"
             , "Request Headers :\n"
@@ -221,3 +224,8 @@ byteSink bytes = sink 0
 catchAny :: IO a -> (SomeException -> IO a) -> IO a
 catchAny action onE =
     withAsync action waitCatch >>= either onE return
+
+get, post :: HT.Method
+get = HT.methodGet
+post = HT.methodPost
+

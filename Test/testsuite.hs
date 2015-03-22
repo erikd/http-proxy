@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 
+import Data.ByteString (ByteString)
 import Control.Concurrent.Async
-import Data.Char (toUpper)
+import Data.Char
 import Test.Hspec
 
 -- import qualified Network.HTTP.Conduit as HC
@@ -14,7 +15,7 @@ import Test.TestServer
 import Test.Util
 
 proxyTestDebug :: Bool
-proxyTestDebug = True
+proxyTestDebug = False
 
 main :: IO ()
 main =
@@ -28,30 +29,57 @@ main =
 
 runProxyTests :: Bool -> SpecWith ()
 runProxyTests debug = do
-    describe "Proxying HTTP:" $ proxyTest ("http", httpTestPort) debug
-    describe "Proxying HTTPS:" $ proxyTest ("https", httpsTestPort) debug
+    describe "Simple HTTP proxying:" $ proxyTest Http debug
+    describe "Simple HTTPS proxying:" $ proxyTest Https debug
 
-proxyTest :: (String, Int) -> Bool -> Spec
-proxyTest (trans, port) debug = do
-    let tname = map toUpper trans
-    it ("Simple " ++ tname ++ " GET.") $
-        testSingleUrl debug ( HT.methodGet, trans ++ "://localhost:" ++ show port ++ "/", Nothing )
-    it ("Simple " ++ tname ++ " GET with query.") $
-        testSingleUrl debug ( HT.methodGet, trans ++ "://localhost:" ++ show port ++ "/a?b=1&c=2", Nothing )
-    it ("Simple " ++ tname ++ " GET with request body.") $
-        testSingleUrl debug ( HT.methodGet, trans ++ "://localhost:" ++ show port ++ "/", Just "Hello server!" )
-    it ("Simple " ++ tname ++ " GET /forbidden returns 403.") $
-        testSingleUrl debug ( HT.methodGet,  trans ++ "://localhost:" ++ show port ++ "/forbidden", Nothing )
-    it ("Simple " ++ tname ++ " POST.") $
-        testSingleUrl debug ( HT.methodPost, trans ++ "://localhost:" ++ show port ++ "/", Nothing )
-    it ("Simple " ++ tname ++ " POST with request body.") $
-        testSingleUrl debug ( HT.methodPost, trans ++ "://localhost:" ++ show port ++ "/", Just "Hello server!" )
-    it ("Simple " ++ tname ++ " POST /forbidden returns 403.") $
-        testSingleUrl debug ( HT.methodGet,  trans ++ "://localhost:" ++ show port ++ "/forbidden", Nothing )
+proxyTest :: UriScheme -> Bool -> Spec
+proxyTest uris debug = do
+    let tname = show uris
+    it (tname ++ " GET.") $
+        testSingleUrl debug $ mkGetRequest uris "/"
+    it (tname ++ " GET with query.") $
+        testSingleUrl debug $ mkGetRequest uris "/a?b=1&c=2"
+    it (tname ++ " GET with request body.") $
+        testSingleUrl debug $ mkGetRequestWithBody uris "/" "Hello server!"
+    it (tname ++ " GET /forbidden returns 403.") $
+        testSingleUrl debug $ mkGetRequest uris "/forbidden"
+    it (tname ++ " GET /not-found returns 404.") $
+        testSingleUrl debug $ mkGetRequest uris "/not-found"
+    it (tname ++ " POST.") $
+        testSingleUrl debug $ mkPostRequest uris "/"
+    it (tname ++ " POST with request body.") $
+        testSingleUrl debug $ mkPostRequestWithBody uris "/" "Hello server!"
+    it (tname ++ " POST /forbidden returns 403.") $
+        testSingleUrl debug $ mkPostRequest uris "/forbidden"
+    it (tname ++ " POST /not-found returns 404.") $
+        testSingleUrl debug $ mkPostRequest uris "/not-found"
+
+
+mkTestRequest :: HT.Method -> UriScheme -> String -> Maybe ByteString -> TestRequest
+mkTestRequest meth scheme path body =
+    let port = show $ case scheme of
+                        Http -> httpTestPort
+                        Https -> httpsTestPort
+    in  ( meth
+        , map toLower (show scheme) ++ "://localhost:" ++ port ++ path
+        , body
+        )
+
+mkGetRequest :: UriScheme -> String -> TestRequest
+mkGetRequest scheme path = mkTestRequest get scheme path Nothing
+
+mkGetRequestWithBody :: UriScheme -> String -> ByteString -> TestRequest
+mkGetRequestWithBody scheme path body = mkTestRequest get scheme path (Just body)
+
+mkPostRequest :: UriScheme -> String -> TestRequest
+mkPostRequest scheme path = mkTestRequest post scheme path Nothing
+
+mkPostRequestWithBody :: UriScheme -> String -> ByteString -> TestRequest
+mkPostRequestWithBody scheme path body = mkTestRequest post scheme path (Just body)
 
 
 runTestProxy :: Settings -> IO ()
-runTestProxy settings = catchAny (runProxySettings settings) $ print
+runTestProxy settings = catchAny (runProxySettings settings) print
 
 testProxySettings :: Settings
 testProxySettings = defaultSettings

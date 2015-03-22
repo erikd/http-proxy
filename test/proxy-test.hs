@@ -13,7 +13,6 @@ import Network.HTTP.Proxy
 import Control.Applicative ((<$>))
 import Control.Concurrent (forkIO, killThread)
 import Control.Concurrent.Async
-import Control.Exception
 import Control.Monad (unless, when)
 import Data.ByteString.Lex.Integral (readDecimal_)
 import Data.Char (isSpace)
@@ -200,8 +199,8 @@ httpsConnectTest = do
         ]
 
 withTestServerAndProxy :: Int -> Settings -> IO a -> IO a
-withTestServerAndProxy httpTestPort testProxySettings action =
-    withAsync (runTestServer httpTestPort) $ \ async1 ->
+withTestServerAndProxy port testProxySettings action =
+    withAsync (runTestServer port) $ \ async1 ->
         withAsync (runTestProxy testProxySettings) $ \ async2 -> do
             res <- action
             cancel async1
@@ -210,11 +209,4 @@ withTestServerAndProxy httpTestPort testProxySettings action =
 
 
 runTestProxy :: Settings -> IO ()
-runTestProxy settings =
-    catchAny (runProxySettings settings) $ \ _ -> return ()
-  where
-    tryAny :: IO a -> IO (Either SomeException a)
-    tryAny action = withAsync action waitCatch
-
-    catchAny :: IO a -> (SomeException -> IO a) -> IO a
-    catchAny action onE = tryAny action >>= either onE return
+runTestProxy settings = catchAny (runProxySettings settings) print

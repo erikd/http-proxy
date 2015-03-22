@@ -153,7 +153,7 @@ proxyApp mgr req respond
                         HC.requestBodySourceChunkedIO (sourceRequestBody req)
                     Wai.KnownLength l ->
                         HC.requestBodySourceIO (fromIntegral l) (sourceRequestBody req)
-            , HC.decompress = \_ -> True
+            , HC.decompress = const True
             , HC.checkStatus = \_ _ _ -> Nothing
             }
     HC.withResponse req2 mgr $ \res -> do

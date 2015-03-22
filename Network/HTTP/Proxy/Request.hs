@@ -20,7 +20,6 @@ module Network.HTTP.Proxy.Request
 import Data.ByteString.Char8 (ByteString)
 import Data.Maybe
 
-import qualified Data.CaseInsensitive as CI
 import qualified Network.HTTP.Types as HT
 import qualified Network.Wai as Wai
 
@@ -55,4 +54,4 @@ waiRequest :: Request -> Wai.Request
 waiRequest = error "waiRequest"
 
 waiRequestHost :: Wai.Request -> ByteString
-waiRequestHost req = fromMaybe "???" $ lookup (CI.mk "Host") (Wai.requestHeaders req)
+waiRequestHost req = fromMaybe "???" $ Wai.requestHeaderHost req
