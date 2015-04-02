@@ -1,11 +1,8 @@
 {-# LANGUAGE CPP, OverloadedStrings #-}
-
----------------------------------------------------------
---
--- Copyright     : Erik de Castro Lopo
--- Maintainer    : Erik de Castro Lopo <erikd@mega-nerd.com>
--- License       : BSD3
----------------------------------------------------------
+------------------------------------------------------------
+-- Copyright : Erik de Castro Lopo <erikd@mega-nerd.com>
+-- License : BSD3
+------------------------------------------------------------
 
 module Network.HTTP.Proxy.Request
     ( Port

@@ -1,11 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
-
----------------------------------------------------------
---
--- Copyright (c)  Erik de Castro Lopo <erikd@mega-nerd.com>
+------------------------------------------------------------
+-- Copyright : Erik de Castro Lopo <erikd@mega-nerd.com>
 -- License : BSD3
---
----------------------------------------------------------
+------------------------------------------------------------
 
 module Test.HttpHttpsRewriteTest
     ( httpToHttpsRewriteTest

@@ -1,20 +1,18 @@
 {-# LANGUAGE CPP, FlexibleContexts, OverloadedStrings #-}
-
----------------------------------------------------------
---
--- Copyright     : Michael Snoyman, Erik de Castro Lopo
--- Maintainer    : Erik de Castro Lopo <erikd@mega-nerd.com>
--- License       : BSD3
+--------------------------------------------------------------------------------
+-- Copyright  : Michael Snoyman, Erik de Castro Lopo
+-- Maintainer : Erik de Castro Lopo <erikd@mega-nerd.com>
+-- License : BSD3
 --
 -- History:
 --   Previous versions of http-proxy included a modified version of the Warp
 --   web server. Thankfully, Michael Snoyman made changes to Warp and Wai to
---   allow both a HTTP and a HTTPS proxyi to be implemented solely as a Wai
+--   allow both a HTTP and a HTTPS proxy to be implemented solely as a Wai
 --   Application.
 --   This version of http-proxy is based on a piece of code Michael Snoyman
 --   published as a gist on github.com.
 --
----------------------------------------------------------
+--------------------------------------------------------------------------------
 
 -- | This module contains a simple HTTP and HTTPS proxy. In the most basic
 -- setup, the caller specifies a port and runs it as follows:

@@ -1,4 +1,4 @@
-TARGETS = proxy request-rewrite-proxy proxy-test
+TARGETS = proxy request-rewrite-proxy
 
 GHC = ghc -Wall -fwarn-missing-signatures -fwarn-tabs
 
@@ -12,10 +12,7 @@ clean :
 	find . -name \*.hi -exec rm -f {} \;
 	rm -rf dist $(TARGETS)
 
-check : $(TARGETS)
-	./proxy-test
-
-hspec :
+check :
 	runghc -Wall Test/testsuite.hs
 
 #-------------------------------------------------------------------------------

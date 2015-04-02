@@ -1,22 +1,17 @@
 {-# LANGUAGE OverloadedStrings #-}
-
----------------------------------------------------------
---
--- Copyright (c)  Erik de Castro Lopo <erikd@mega-nerd.com>
+------------------------------------------------------------
+-- Copyright : Erik de Castro Lopo <erikd@mega-nerd.com>
 -- License : BSD3
---
----------------------------------------------------------
+------------------------------------------------------------
 
 module Test.Util where
 
 import Blaze.ByteString.Builder
-import Control.Monad.Trans.Resource
-import System.IO
 import Control.Concurrent.Async
 import Control.Exception hiding (assert)
-
 import Control.Monad (forM_, when, unless)
 import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.Trans.Resource
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import Data.String (fromString)
@@ -33,62 +28,48 @@ import qualified Network.Wai as Wai
 
 import Network.HTTP.Proxy.Request
 
-
-data UriScheme
-    = Http | Https
-    deriving Show
-
-type TestRequest = ( HT.Method, String, Maybe ByteString )
-
-
-httpTestPort, httpsTestPort, testProxyPort :: Int
-httpTestPort = 31080
-httpsTestPort = 31443
-testProxyPort = 31088
+import Test.Request
+import Test.ServerDef
 
 
 dumpWaiRequest :: Wai.Request -> IO ()
 dumpWaiRequest req =
-    let text = BS.concat
-            [ "------- Wai Request --------------------------------------------------------------\n"
-            , "Method          : " , Wai.requestMethod req , "\n"
-            , "HTTP Version    : " , fromString (show (Wai.httpVersion req)) , "\n"
-            , "Path Info       : " , Wai.rawPathInfo req , "\n"
-            , "Query String    : " , Wai.rawQueryString req , "\n"
-            , "Server          : " , waiRequestHost req , "\n"
-            , "Secure (SSL)    : " , fromString (show (Wai.isSecure req)), "\n"
-            , "Remote Host     : " , fromString (show (Wai.remoteHost req)), "\n"
-            , "Request Headers :\n"
-            , headerShow (Wai.requestHeaders req), "\n"
+    mapM_ BS.putStrLn
+            [ "------- Wai Request --------------------------------------------------------------"
+            , "Method          : " , Wai.requestMethod req
+            , "HTTP Version    : " , fromString (show (Wai.httpVersion req))
+            , "Path Info       : " , Wai.rawPathInfo req
+            , "Query String    : " , Wai.rawQueryString req
+            , "Server          : " , waiRequestHost req
+            , "Secure (SSL)    : " , fromString (show (Wai.isSecure req))
+            , "Remote Host     : " , fromString (show (Wai.remoteHost req))
+            , "Request Headers :"
+            , headerShow (Wai.requestHeaders req)
             ]
-    in BS.putStr text
 
 
 dumpHttpConduitRequest :: HC.Request -> IO ()
 dumpHttpConduitRequest req =
-    let text = BS.concat
-            [ "------- HttpConduit Request ------------------------------------------------------\n"
-            , "Method          : " , HC.method req , "\n"
-            , "Secure (SSL)    : " , fromString (show (HC.secure req)), "\n"
-            , "Host Name       : " , HC.host req , "\n"
-            , "Host Port       : " , fromString (show (HC.port req)), "\n"
-            , "Path            : " , HC.path req , "\n"
-            , "Query String    : " , HT.urlDecode False (HC.queryString req), "\n"
-            , "Request Headers :\n"
-            , headerShow (HC.requestHeaders req), "\n"
+    mapM_ BS.putStrLn
+            [ "------- HttpConduit Request ------------------------------------------------------"
+            , "Method          : " , HC.method req
+            , "Secure (SSL)    : " , fromString (show (HC.secure req))
+            , "Host Name       : " , HC.host req
+            , "Host Port       : " , fromString (show (HC.port req))
+            , "Path            : " , HC.path req
+            , "Query String    : " , HT.urlDecode False (HC.queryString req)
+            , "Request Headers :"
+            , headerShow (HC.requestHeaders req)
             ]
-    in BS.putStr text
 
 
 dumpHttpResponse :: HT.Status -> HT.ResponseHeaders -> IO ()
 dumpHttpResponse s rh = do
-    let text = BS.concat
-            [ "------- Response from upsteam ----------------------------------------------------\n"
-            , "HTTP/1.0 ", BS.pack (show (HT.statusCode s)), " ", HT.statusMessage s, "\n"
-            ]
-
-    BS.putStr text
-    BS.putStr $ BS.concat $ map (\ (f, v) -> BS.concat [ "    ", CI.original f, ": ", v, "\n" ]) rh
+    mapM_ BS.putStrLn
+        [ "------- Response from upsteam ----------------------------------------------------"
+        , "HTTP/1.0 ", BS.pack (show (HT.statusCode s)), " ", HT.statusMessage s
+        ]
+    BS.putStr . BS.concat $ map (\ (f, v) -> BS.concat [ "    ", CI.original f, ": ", v, "\n" ]) rh
 
 
 headerShow :: [HT.Header] -> ByteString
@@ -99,11 +80,11 @@ headerShow headers =
 
 --------------------------------------------------------------------------------
 
-data Result = Result Int HT.HttpVersion [HT.Header] ByteString
+data Result = Result Int [HT.Header] ByteString
 
 
 printResult :: Result -> IO ()
-printResult (Result status _ headers body) = do
+printResult (Result status headers body) = do
     putStrLn $ "Response status : " ++ show status
     putStrLn "Response headers :"
     BS.putStr $ headerShow headers
@@ -112,23 +93,9 @@ printResult (Result status _ headers body) = do
 
 --------------------------------------------------------------------------------
 
-printTestMsgR :: String -> IO ()
-printTestMsgR str = do
-    putStr $ "    " ++ take 45 (str ++ replicate 45 ' ') ++ ": "
-    hFlush stdout
-
-operationSizeMsgR :: String -> Int64 -> IO ()
-operationSizeMsgR op size =
-    printTestMsgR $ "Testing " ++ op ++ " operation  (" ++ show size ++ " bytes)"
-
-printPassR :: IO ()
-printPassR = putStrLn "pass"
-
---------------------------------------------------------------------------------
-
 -- | Compare results and error out if they're different.
 compareResult :: Result -> Result -> IO ()
-compareResult (Result sa _ ha ba) (Result sb _ hb bb) = do
+compareResult (Result sa ha ba) (Result sb hb bb) = do
     assert (sa == sb) $ "HTTP status codes don't match : " ++ show sa ++ " /= " ++ show sb
     forM_ [ "server", "content-type", "content-length" ] $ \v ->
         assertMaybe (lookup v ha) (lookup v hb) $ \ ja jb ->
@@ -174,12 +141,11 @@ setupRequest (method, url, reqBody) = do
 httpRun :: HC.Request -> IO Result
 httpRun req = HC.withManagerSettings settings $ \mgr -> do
     resp <- HC.http req mgr
-    (_bdy, finalizer) <- DC.unwrapResumable $ HC.responseBody resp
+    (_body, finalizer) <- DC.unwrapResumable $ HC.responseBody resp
     bodyText <- HC.responseBody resp DC.$$+- CB.take 819200000
     finalizer
     return $ Result (HT.statusCode $ HC.responseStatus resp)
-                (HC.responseVersion resp) (HC.responseHeaders resp)
-                $ BS.concat $ LBS.toChunks bodyText
+                (HC.responseHeaders resp) $ BS.concat $ LBS.toChunks bodyText
   where
     settings = HC.mkManagerSettings (TLSSettingsSimple True False False) Nothing
 
@@ -196,7 +162,7 @@ byteSource bytes = loop 0
             loop $ count + blockSize64
         | otherwise = do
             let n = fromIntegral $ bytes - count
-            DC.yield $ DC.Chunk $ fromByteString $ BS.take n bsbytes
+            DC.yield . DC.Chunk . fromByteString $ BS.take n bsbytes
             return ()
 
     blockSize = 8192
@@ -208,24 +174,19 @@ byteSource bytes = loop 0
 byteSink :: Int64 -> DC.Sink ByteString (ResourceT IO) ()
 byteSink bytes = sink 0
   where
-    -- sink :: Int64 -> ByteString -> ResourceT IO (DC.SinkStateResult Int64 ByteString ())
+    sink :: Monad m => Int64 -> DC.Sink ByteString m ()
     sink count = do
         mbs <- DC.await
         case mbs of
             Nothing -> close count
             Just bs -> sink (count + fromIntegral (BS.length bs))
 
-    -- close :: Monad m => Int64 -> DC.Pipe l0 i0 o0 u0 m ()
+    close :: Monad m => Int64 -> m ()
     close count =
-        when (count /= bytes) $
+        when (count /= bytes) .
             error $ "httpCheckGetBodySize : Body length " ++ show count ++ " should have been " ++ show bytes
 
 
 catchAny :: IO a -> (SomeException -> IO a) -> IO a
 catchAny action onE =
     withAsync action waitCatch >>= either onE return
-
-get, post :: HT.Method
-get = HT.methodGet
-post = HT.methodPost
-
