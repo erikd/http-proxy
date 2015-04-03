@@ -5,6 +5,8 @@
 ------------------------------------------------------------
 
 import Control.Concurrent.Async
+import Control.Monad
+import Data.Int (Int64)
 import Test.Hspec
 
 import Network.HTTP.Proxy
@@ -22,7 +24,7 @@ main :: IO ()
 main =
     withAsync (runTestServer httpTestPort) $ \ asyncHttpServer ->
     withAsync (runTestServerTLS httpsTestPort) $ \ asyncHttpsServer ->
-    withAsync (runTestProxy testProxySettings) $ \asyncProxy -> do
+    withAsync (runTestProxy testProxySettings) $ \ asyncProxy -> do
         hspec $ runProxyTests proxyTestDebug
         cancel asyncProxy
         cancel asyncHttpServer
@@ -32,6 +34,7 @@ runProxyTests :: Bool -> SpecWith ()
 runProxyTests dbg = do
     describe "Simple HTTP proxying:" $ proxyTest Http dbg
     describe "Simple HTTPS proxying:" $ proxyTest Https dbg
+    describe "HTTP streaming:" $ streamingTest dbg
 
 proxyTest :: UriScheme -> Bool -> Spec
 proxyTest uris dbg = do
@@ -55,6 +58,19 @@ proxyTest uris dbg = do
     it (tname ++ " POST /not-found returns 404.") $
         testSingleUrl dbg $ mkPostRequest uris "/not-found"
 
+
+-- Only need to do this test for HTTP.
+streamingTest :: Bool -> Spec
+streamingTest dbg =
+    forM_ [ 100, oneThousand, oneMillion, oneBillion ] $ \ size ->
+        it ("Http GET " ++ show (size :: Int64) ++ " bytes.") $
+            testSingleUrl dbg $ mkGetRequest Http ("/large-get?" ++ show size)
+
+
+oneThousand, oneMillion, oneBillion :: Int64
+oneThousand = 1000
+oneMillion = oneThousand * oneThousand
+oneBillion = oneThousand * oneMillion
 
 runTestProxy :: Settings -> IO ()
 runTestProxy settings = catchAny (runProxySettings settings) print

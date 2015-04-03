@@ -47,6 +47,7 @@ import Data.Monoid
 import Network.Wai.Conduit hiding (Request)
 
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.CaseInsensitive as CI
 import qualified Data.Conduit.Network as NC
 import qualified Network.HTTP.Client as HC
 import qualified Network.HTTP.Conduit as HC
@@ -73,9 +74,9 @@ runProxy port = runProxySettings $ defaultSettings { proxyPort = port }
 
 -- | Run a HTTP and HTTPS proxy server with the specified settings.
 runProxySettings :: Settings -> IO ()
-runProxySettings set = do
-    mgr <- HC.newManager HC.conduitManagerSettings
-    Warp.runSettings (warpSettings set) $ proxyApp mgr
+runProxySettings set =
+    HC.newManager HC.conduitManagerSettings
+        >>= Warp.runSettings (warpSettings set) . proxyApp
 
 
 -- | Various proxy server settings. This is purposely kept as an abstract data
@@ -126,7 +127,7 @@ defaultSettings = Settings
     defaultExceptionResponse :: SomeException -> Wai.Response
     defaultExceptionResponse _ =
         Wai.responseLBS HT.internalServerError500
-                [(HT.hContentType, "text/plain; charset=utf-8")]
+                [ (HT.hContentType, "text/plain; charset=utf-8") ]
                 "Something went wrong in the proxy."
 
 
@@ -135,38 +136,36 @@ defaultSettings = Settings
 
 proxyApp :: HC.Manager -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 proxyApp mgr req respond
- | Wai.requestMethod req == "CONNECT" =
+    | Wai.requestMethod req == "CONNECT" =
             respond $ responseRawSource (handleConnect req)
                     (Wai.responseLBS HT.status500 [("Content-Type", "text/plain")] "No support for responseRaw")
- | otherwise = do
-    -- print (Wai.rawPathInfo req, Wai.rawQueryString req, Wai.requestHeaders req)
-    let url = Wai.rawPathInfo req `mappend` Wai.rawQueryString req
-    req2' <- HC.parseUrl $ BS.unpack url
-    let req2 = req2'
-            { HC.method = Wai.requestMethod req
-            , HC.requestHeaders = filter safeReqHeader $ Wai.requestHeaders req
-            , HC.requestBody =
-                case Wai.requestBodyLength req of
-                    Wai.ChunkedBody ->
-                        HC.requestBodySourceChunkedIO (sourceRequestBody req)
-                    Wai.KnownLength l ->
-                        HC.requestBodySourceIO (fromIntegral l) (sourceRequestBody req)
-            , HC.decompress = const True
-            , HC.checkStatus = \_ _ _ -> Nothing
-            }
-    HC.withResponse req2 mgr $ \res -> do
-        let body = mapOutput (Chunk . fromByteString) $ HCC.bodyReaderSource $ HC.responseBody res
-            headers = filter safeResHeader $ HC.responseHeaders res
-        respond $ responseSource (HC.responseStatus res) headers body
-  where
-    safeReqHeader (k, _) = k `elem` -- FIXME expand
-        [ "user-agent"
-        , "accept"
-        , "cookie"
-        ]
-    safeResHeader (k, _) = k `elem` -- FIXME expand
-        [ "content-type"
-        ]
+    | otherwise = do
+        -- print (Wai.rawPathInfo req, Wai.rawQueryString req, Wai.requestHeaders req)
+        let url = Wai.rawPathInfo req `mappend` Wai.rawQueryString req
+        req2' <- HC.parseUrl $ BS.unpack url
+        let req2 = req2'
+                { HC.method = Wai.requestMethod req
+                , HC.requestHeaders = filter dropRequestHeader $ Wai.requestHeaders req
+                , HC.requestBody =
+                    case Wai.requestBodyLength req of
+                        Wai.ChunkedBody ->
+                            HC.requestBodySourceChunkedIO (sourceRequestBody req)
+                        Wai.KnownLength l ->
+                            HC.requestBodySourceIO (fromIntegral l) (sourceRequestBody req)
+                , HC.decompress = const True
+                , HC.checkStatus = \_ _ _ -> Nothing
+                }
+        HC.withResponse req2 mgr $ \res -> do
+            let body = mapOutput (Chunk . fromByteString) $ HCC.bodyReaderSource $ HC.responseBody res
+                headers = (CI.mk "X-Via-Proxy", "yes") : filter dropResponseHeader (HC.responseHeaders res)
+            respond $ responseSource (HC.responseStatus res) headers body
+      where
+        dropRequestHeader (k, _) = k `notElem`
+            [ "content-encoding"
+            , "content-length"
+            ]
+        dropResponseHeader (k, _) = k `notElem` []
+
 
 handleConnect :: Wai.Request -> Source IO BS.ByteString -> Sink BS.ByteString IO () -> IO ()
 handleConnect req fromClient toClient = do

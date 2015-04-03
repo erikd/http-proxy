@@ -7,6 +7,7 @@
 module Test.Util where
 
 import Blaze.ByteString.Builder
+import Control.Applicative
 import Control.Concurrent.Async
 import Control.Exception hiding (assert)
 import Control.Monad (forM_, when, unless)
@@ -14,6 +15,7 @@ import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Trans.Resource
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
+import Data.Maybe
 import Data.String (fromString)
 import Network.Connection
 
@@ -76,15 +78,15 @@ headerShow :: [HT.Header] -> ByteString
 headerShow headers =
     BS.concat $ map hdrShow headers
   where
-    hdrShow (f, v) = BS.concat [ "  ", CI.original f , ": " , v, "\n" ]
+    hdrShow (f, v) = BS.concat [ "    ", CI.original f , ": " , v, "\n" ]
 
 --------------------------------------------------------------------------------
 
-data Result = Result Int [HT.Header] ByteString
+data Result = Result Bool Int [HT.Header] ByteString
 
 
 printResult :: Result -> IO ()
-printResult (Result status headers body) = do
+printResult (Result _ status headers body) = do
     putStrLn $ "Response status : " ++ show status
     putStrLn "Response headers :"
     BS.putStr $ headerShow headers
@@ -95,15 +97,19 @@ printResult (Result status headers body) = do
 
 -- | Compare results and error out if they're different.
 compareResult :: Result -> Result -> IO ()
-compareResult (Result sa ha ba) (Result sb hb bb) = do
+compareResult (Result secure sa ha ba) (Result _ sb hb bb) = do
     assert (sa == sb) $ "HTTP status codes don't match : " ++ show sa ++ " /= " ++ show sb
     forM_ [ "server", "content-type", "content-length" ] $ \v ->
         assertMaybe (lookup v ha) (lookup v hb) $ \ ja jb ->
             "Header field '" ++ show v ++ "' doesn't match : '" ++ show ja ++ "' /= '" ++ show jb
     assert (ba == bb) $ "HTTP response bodies are different :\n" ++ BS.unpack ba ++ "\n-----------\n" ++ BS.unpack bb
+    when (not secure && isJust (lookup "X-Via-Proxy" ha)) $
+        error "Error: Direct connection should not contain 'X-Via-Proxy' header."
+    when (not secure && isNothing (lookup "X-Via-Proxy" hb)) $
+        error "Error: Direct connection should not contain 'X-Via-Proxy' header."
   where
     assert :: Bool -> String -> IO ()
-    assert b msg = unless b $ error msg
+    assert b = unless b . error
 
     assertMaybe :: Eq a => Maybe a -> Maybe a -> (a -> a -> String) -> IO ()
     assertMaybe Nothing _ _ = return ()
@@ -127,9 +133,7 @@ setupRequest (method, url, reqBody) = do
     req <- HC.parseUrl url
     return $ req
         { HC.method = if HC.method req /= method then method else HC.method req
-        , HC.requestBody = case reqBody of
-                            Just x -> HC.RequestBodyBS x
-                            Nothing -> HC.requestBody req
+        , HC.requestBody = maybe (HC.requestBody req) HC.RequestBodyBS reqBody
         -- In this test program we want to pass error pages back to the test
         -- function so the error output can be compared.
         , HC.checkStatus = \ _ _ _ -> Nothing
@@ -141,14 +145,12 @@ setupRequest (method, url, reqBody) = do
 httpRun :: HC.Request -> IO Result
 httpRun req = HC.withManagerSettings settings $ \mgr -> do
     resp <- HC.http req mgr
-    (_body, finalizer) <- DC.unwrapResumable $ HC.responseBody resp
-    bodyText <- HC.responseBody resp DC.$$+- CB.take 819200000
-    finalizer
-    return $ Result (HT.statusCode $ HC.responseStatus resp)
-                (HC.responseHeaders resp) $ BS.concat $ LBS.toChunks bodyText
+    let contentLen = readInt64 <$> lookup HT.hContentLength (HC.responseHeaders resp)
+    bodyText <- checkBodySize (HC.responseBody resp) contentLen
+    return $ Result (HC.secure req) (HT.statusCode $ HC.responseStatus resp)
+                    (HC.responseHeaders resp) bodyText
   where
     settings = HC.mkManagerSettings (TLSSettingsSimple True False False) Nothing
-
 
 
 byteSource :: Int64 -> DC.Source (ResourceT IO) (DC.Flush Builder)
@@ -165,26 +167,42 @@ byteSource bytes = loop 0
             DC.yield . DC.Chunk . fromByteString $ BS.take n bsbytes
             return ()
 
-    blockSize = 8192
+    blockSize = 8192 :: Int
     blockSize64 = fromIntegral blockSize :: Int64
     bsbytes = BS.replicate blockSize '?'
     bbytes = fromByteString bsbytes
 
 
-byteSink :: Int64 -> DC.Sink ByteString (ResourceT IO) ()
+checkBodySize :: DC.ResumableSource (ResourceT IO) ByteString -> Maybe Int64 -> ResourceT IO ByteString
+checkBodySize bodySrc Nothing = fmap (BS.concat . LBS.toChunks) $ bodySrc DC.$$+- CB.take 1000
+checkBodySize bodySrc (Just len) = do
+    let blockSize = 1000
+    if len <= blockSize
+        then checkBodySize bodySrc Nothing
+        else do
+            (resumeSrc, first) <- bodySrc DC.$$++ CB.take (fromIntegral blockSize)
+            res <- resumeSrc DC.$$+- byteSink (len - blockSize)
+            return $ maybe (BS.concat $ LBS.toChunks first) BS.pack res
+
+
+byteSink :: Int64 -> DC.Sink ByteString (ResourceT IO) (Maybe String)
 byteSink bytes = sink 0
   where
-    sink :: Monad m => Int64 -> DC.Sink ByteString m ()
-    sink count = do
-        mbs <- DC.await
-        case mbs of
-            Nothing -> close count
-            Just bs -> sink (count + fromIntegral (BS.length bs))
+    sink :: Monad m => Int64 -> DC.Sink ByteString m (Maybe String)
+    sink count = DC.await >>=
+        maybe (close count) (\bs -> sink (count + fromIntegral (BS.length bs)))
 
-    close :: Monad m => Int64 -> m ()
+    close :: Monad m => Int64 -> m (Maybe String)
     close count =
-        when (count /= bytes) .
-            error $ "httpCheckGetBodySize : Body length " ++ show count ++ " should have been " ++ show bytes
+        return $
+            if count == bytes
+                then Nothing
+                else Just $ "Error : Body length " ++ show count
+                                ++ " should have been " ++ show bytes ++ "."
+
+
+readInt64 :: ByteString -> Int64
+readInt64 = read . BS.unpack
 
 
 catchAny :: IO a -> (SomeException -> IO a) -> IO a

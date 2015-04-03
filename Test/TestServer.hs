@@ -7,10 +7,15 @@
 module Test.TestServer
     ( runTestServer
     , runTestServerTLS
+
+    -- Add this here for now to avoid warnings.
+    , largePostCheck
     ) where
 
 import Blaze.ByteString.Builder hiding (flush)
+import Control.Applicative
 import Control.Monad.Trans.Resource
+import Data.List (sort)
 import Data.String
 import Network.HTTP.Types
 import Network.Wai
@@ -73,7 +78,7 @@ serverApp req respond
                 , "  Server          : " , HPR.waiRequestHost req , "\n"
                 , "  Secure (SSL)    : " , fromString (show (isSecure req)), "\n"
                 , "  Request Headers :\n"
-                , headerShow (requestHeaders req)
+                , headerShow (sort $ requestHeaders req)
                 , "\n"
                 ]
             respHeaders = [ (hContentType, "text/plain") ]
@@ -85,12 +90,15 @@ streamingByteSource len write flush =
     loop len
   where
     loop remaining
-        | remaining > 0 = do
-            let current = min 2048 remaining
-            write . fromByteString $ BS.replicate current 'a'
+        | remaining > blockSize = do
+            write $ fromByteString block
             flush
-            loop $ remaining - current
-        | otherwise = return ()
+            loop $ remaining - blockSize
+        | otherwise = do
+            write . fromByteString $ BS.take remaining block
+            flush
+    block = BS.replicate blockSize 'a'
+    blockSize = 2048
 
 
 simpleResponse :: Status -> ByteString -> Response
@@ -107,12 +115,8 @@ responseBS status headers text = responseLBS status headers$ LBS.fromChunks [tex
 
 
 largePostCheck :: Int64 -> DC.Source (ResourceT IO) ByteString -> ResourceT IO Response
-largePostCheck len rbody = do
-    rbody $$ byteSink len
-    let text = BS.pack $ "Post-size:" ++ show len
-    let respHeaders =
-            [ (hContentType, "text/plain")
-            , (hContentLength, fromString $ show $ BS.length text)
-            ]
-    return $ responseBS status200 respHeaders text
-
+largePostCheck len rbody =
+    maybe success failure <$> (rbody $$ byteSink len)
+  where
+    success = simpleResponse status200 . BS.pack $ "Post-size:" ++ show len
+    failure = simpleResponse status500 . BS.pack
