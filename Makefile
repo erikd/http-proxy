@@ -1,27 +1,33 @@
-TARGETS = proxy request-rewrite-proxy
+TARGETS = proxy request-rewrite-proxy testsuite
 
-GHC = ghc -Wall -fwarn-tabs
+GHCFLAGS = -Wall -fwarn-tabs
+GHC := $(shell if test -f cabal.sandbox.config ; then echo "cabal exec -- ghc $(GHCFLAGS)" ; else echo "ghc $(GHCFLAGS)" ; fi)
 
-LIBSRC := $(shell find Network -name \*.hs)
-TESTSRC := $(shell find Test -name \*.hs)
+HSRC := $(shell find Network Test -name \*.hs)
 
 all : $(TARGETS)
 
 clean :
-	find . -name \*.o -exec rm -f {} \;
-	find . -name \*.hi -exec rm -f {} \;
-	rm -rf dist $(TARGETS)
+	find Network Test example -name \*.o -exec rm -f {} \;
+	find Network Test example -name \*.hi -exec rm -f {} \;
+	rm -rf $(TARGETS)
 
 check : testsuite
 	./testsuite
 
+init : cabal.sandbox.config
+
+cabal.sandbox.config :
+	cabal sandbox init
+	cabal install --dependencies-only
+
 #-------------------------------------------------------------------------------
 
-testsuite : $(TESTSRC) $(LIBSRC)
+testsuite : $(HSRC)
 	$(GHC) -with-rtsopts="-M512m" -Wall -O2 -threaded Test/testsuite.hs -o $@
 
-proxy : example/proxy.hs $(LIBSRC)
+proxy : example/proxy.hs $(HSRC)
 	$(GHC) --make $< -o $@
 
-request-rewrite-proxy : example/request-rewrite-proxy.hs $(LIBSRC)
+request-rewrite-proxy : example/request-rewrite-proxy.hs $(HSRC)
 	$(GHC) --make $< -o $@
