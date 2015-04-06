@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings #-}
 ------------------------------------------------------------
 -- Copyright : Erik de Castro Lopo <erikd@mega-nerd.com>
 -- License : BSD3
@@ -165,13 +165,13 @@ byteSink :: Int64 -> DC.Sink ByteString (ResourceT IO) (Maybe ByteString)
 byteSink bytes = sink 0
   where
     sink :: Monad m => Int64 -> DC.Sink ByteString m (Maybe ByteString)
-    sink count = DC.await >>= maybe (close count) (sinkBlock count)
+    sink !count = DC.await >>= maybe (close count) (sinkBlock count)
 
     sinkBlock :: Monad m => Int64 -> ByteString -> DC.Sink ByteString m (Maybe ByteString)
-    sinkBlock count bs = sink (count + fromIntegral (BS.length bs))
+    sinkBlock !count bs = sink (count + fromIntegral (BS.length bs))
 
     close :: Monad m => Int64 -> m (Maybe ByteString)
-    close count = return $
+    close !count = return $
             if count == bytes
                 then Nothing
                 else Just . BS.pack $ "Error : Body length " ++ show count
@@ -186,7 +186,7 @@ byteSource :: Monad m => Int64 -> DC.Source m ByteString
 byteSource bytes = loop 0
   where
     loop :: Monad m => Int64 -> DC.Source m ByteString
-    loop count
+    loop !count
         | count >= bytes = return ()
         | count + blockSize64 < bytes = do
             DC.yield bsbytes
