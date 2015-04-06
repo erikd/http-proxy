@@ -12,17 +12,17 @@ module Test.TestServer
     , largePostCheck
     ) where
 
-import Blaze.ByteString.Builder hiding (flush)
 import Control.Applicative
 import Control.Monad.Trans.Resource
+import Data.ByteString (ByteString)
 import Data.List (sort)
 import Data.String
 import Network.HTTP.Types
 import Network.Wai
+import Network.Wai.Conduit
 import Network.Wai.Handler.Warp
 import Network.Wai.Handler.WarpTLS
 
-import Data.ByteString (ByteString)
 import Data.ByteString.Lex.Integral (readDecimal_)
 import Data.Conduit (($$))
 import Data.Int (Int64)
@@ -60,7 +60,7 @@ serverApp req respond
                 [ (hContentType, "text/plain")
                 , (hContentLength, fromString $ show len)
                 ]
-        respond . responseStream status200 respHeaders $ streamingByteSource len
+        respond . responseSource status200 respHeaders $ builderSource len
 
     | rawPathInfo req == "/large-post" && requestMethod req == "POST" = do
         let len = maybe 0 readDecimal_ (lookup "content-length" $ requestHeaders req) :: Int64
@@ -85,22 +85,6 @@ serverApp req respond
         respond . responseLBS status404 respHeaders $ LBS.fromChunks text
 
 
-streamingByteSource :: Int -> (Builder -> IO ()) -> IO () -> IO ()
-streamingByteSource len write flush =
-    loop len
-  where
-    loop remaining
-        | remaining > blockSize = do
-            write $ fromByteString block
-            flush
-            loop $ remaining - blockSize
-        | otherwise = do
-            write . fromByteString $ BS.take remaining block
-            flush
-    block = BS.replicate blockSize 'a'
-    blockSize = 2048
-
-
 simpleResponse :: Status -> ByteString -> Response
 simpleResponse status text = do
     let respHeaders =
@@ -119,4 +103,4 @@ largePostCheck len rbody =
     maybe success failure <$> (rbody $$ byteSink len)
   where
     success = simpleResponse status200 . BS.pack $ "Post-size:" ++ show len
-    failure = simpleResponse status500 . BS.pack
+    failure = simpleResponse status500

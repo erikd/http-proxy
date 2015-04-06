@@ -6,8 +6,13 @@
 
 import Control.Concurrent.Async
 import Control.Monad
+import Control.Monad.Trans.Resource
+import Data.Conduit
 import Data.Int (Int64)
 import Test.Hspec
+
+import qualified Data.ByteString.Char8 as BS
+import qualified Network.HTTP.Types as HT
 
 import Network.HTTP.Proxy
 
@@ -32,6 +37,7 @@ main =
 
 runProxyTests :: Bool -> SpecWith ()
 runProxyTests dbg = do
+    describe "Test helper functionality:" testHelpersTest
     describe "Simple HTTP proxying:" $ proxyTest Http dbg
     describe "Simple HTTPS proxying:" $ proxyTest Https dbg
     describe "HTTP streaming:" $ streamingTest dbg
@@ -59,9 +65,29 @@ proxyTest uris dbg = do
         testSingleUrl dbg $ mkPostRequest uris "/not-found"
 
 
+testHelpersTest :: Spec
+testHelpersTest = do
+    it "Byte Sink catches short response bodies." $
+        runResourceT (byteSource 80 $$ byteSink 100)
+                `shouldReturn` Just "Error : Body length 80 should have been 100."
+
+    it "Byte Source and Sink work in constant memory." $
+        runResourceT (byteSource oneBillion $$ byteSink oneBillion) `shouldReturn` Nothing
+
+    it "Byte Sink catches long response bodies." $
+        runResourceT (byteSource 110 $$ byteSink 100)
+                `shouldReturn` Just "Error : Body length 110 should have been 100."
+
+
 -- Only need to do this test for HTTP.
 streamingTest :: Bool -> Spec
-streamingTest dbg =
+streamingTest dbg = do
+    it "Client and server can stream GET response." $ do
+        let sizeStr = show oneBillion
+        req <- setupRequest $ mkGetRequest Http ("/large-get?" ++ sizeStr)
+        Result _ status hdrs _ <- httpRun req
+        status `shouldBe` 200
+        lookup HT.hContentLength hdrs `shouldBe` Just (BS.pack sizeStr)
     forM_ [ 100, oneThousand, oneMillion, oneBillion ] $ \ size ->
         it ("Http GET " ++ show (size :: Int64) ++ " bytes.") $
             testSingleUrl dbg $ mkGetRequest Http ("/large-get?" ++ show size)
