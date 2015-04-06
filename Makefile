@@ -24,7 +24,7 @@ cabal.sandbox.config :
 #-------------------------------------------------------------------------------
 
 testsuite : $(HSRC)
-	$(GHC) -with-rtsopts="-M512m" -Wall -O2 -threaded Test/testsuite.hs -o $@
+	$(GHC) -with-rtsopts="-M64m" -Wall -O2 -threaded Test/testsuite.hs -o $@
 
 proxy : example/proxy.hs $(HSRC)
 	$(GHC) --make $< -o $@
