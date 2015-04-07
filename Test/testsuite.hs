@@ -46,23 +46,23 @@ proxyTest :: UriScheme -> Bool -> Spec
 proxyTest uris dbg = do
     let tname = show uris
     it (tname ++ " GET.") $
-        testSingleUrl dbg $ mkGetRequest uris "/"
+        testSingleUrl dbg =<< mkGetRequest uris "/"
     it (tname ++ " GET with query.") $
-        testSingleUrl dbg $ mkGetRequest uris "/a?b=1&c=2"
+        testSingleUrl dbg =<< mkGetRequest uris "/a?b=1&c=2"
     it (tname ++ " GET with request body.") $
-        testSingleUrl dbg $ mkGetRequestWithBody uris "/" "Hello server!"
+        testSingleUrl dbg =<< mkGetRequestWithBody uris "/" "Hello server!"
     it (tname ++ " GET /forbidden returns 403.") $
-        testSingleUrl dbg $ mkGetRequest uris "/forbidden"
+        testSingleUrl dbg =<< mkGetRequest uris "/forbidden"
     it (tname ++ " GET /not-found returns 404.") $
-        testSingleUrl dbg $ mkGetRequest uris "/not-found"
+        testSingleUrl dbg =<< mkGetRequest uris "/not-found"
     it (tname ++ " POST.") $
-        testSingleUrl dbg $ mkPostRequest uris "/"
+        testSingleUrl dbg =<< mkPostRequest uris "/"
     it (tname ++ " POST with request body.") $
-        testSingleUrl dbg $ mkPostRequestWithBody uris "/" "Hello server!"
+        testSingleUrl dbg =<< mkPostRequestWithBody uris "/" "Hello server!"
     it (tname ++ " POST /forbidden returns 403.") $
-        testSingleUrl dbg $ mkPostRequest uris "/forbidden"
+        testSingleUrl dbg =<< mkPostRequest uris "/forbidden"
     it (tname ++ " POST /not-found returns 404.") $
-        testSingleUrl dbg $ mkPostRequest uris "/not-found"
+        testSingleUrl dbg =<< mkPostRequest uris "/not-found"
 
 
 testHelpersTest :: Spec
@@ -84,13 +84,13 @@ streamingTest :: Bool -> Spec
 streamingTest dbg = do
     it "Client and server can stream GET response." $ do
         let sizeStr = show oneBillion
-        req <- setupRequest $ mkGetRequest Http ("/large-get?" ++ sizeStr)
+        req <- mkGetRequest Http ("/large-get?" ++ sizeStr)
         Result _ status hdrs _ <- httpRun req
         status `shouldBe` 200
         lookup HT.hContentLength hdrs `shouldBe` Just (BS.pack sizeStr)
     forM_ [ 100, oneThousand, oneMillion, oneBillion ] $ \ size ->
         it ("Http GET " ++ show (size :: Int64) ++ " bytes.") $
-            testSingleUrl dbg $ mkGetRequest Http ("/large-get?" ++ show size)
+            testSingleUrl dbg =<< mkGetRequest Http ("/large-get?" ++ show size)
 
 
 oneThousand, oneMillion, oneBillion :: Int64

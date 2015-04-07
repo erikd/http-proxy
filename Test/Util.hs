@@ -29,7 +29,6 @@ import qualified Network.Wai as Wai
 
 import Network.HTTP.Proxy.Request
 
-import Test.Request
 import Test.ServerDef
 
 
@@ -116,27 +115,14 @@ compareResult (Result secure sa ha ba) (Result _ sb hb bb) = do
     assertMaybe (Just a) (Just b) fmsg = unless (a == b) . error $ fmsg a b
 
 
-testSingleUrl :: Bool -> TestRequest -> IO ()
-testSingleUrl debug testreq = do
-    request <- setupRequest testreq
+testSingleUrl :: Bool -> HC.Request -> IO ()
+testSingleUrl debug request = do
     direct <- httpRun request
     proxy <- httpRun $ HC.addProxy "localhost" testProxyPort request
     when debug $ do
         printResult direct
         printResult proxy
     compareResult direct proxy
-
-
-setupRequest :: TestRequest -> IO HC.Request
-setupRequest (method, url, reqBody) = do
-    req <- HC.parseUrl url
-    return $ req
-        { HC.method = if HC.method req /= method then method else HC.method req
-        , HC.requestBody = maybe (HC.requestBody req) HC.RequestBodyBS reqBody
-        -- In this test program we want to pass error pages back to the test
-        -- function so the error output can be compared.
-        , HC.checkStatus = \ _ _ _ -> Nothing
-        }
 
 
 -- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
