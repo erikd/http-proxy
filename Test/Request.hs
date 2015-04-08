@@ -9,7 +9,8 @@ module Test.Request
     , mkGetRequest
     , mkGetRequestWithBody
     , mkPostRequest
-    , mkPostRequestWithBody
+    , mkPostRequestBS
+    , mkPostRequestBody
     ) where
 
 import Control.Applicative
@@ -40,8 +41,12 @@ mkPostRequest :: UriScheme -> String -> IO HC.Request
 mkPostRequest scheme path = mkTestRequest post scheme path Nothing
 
 
-mkPostRequestWithBody :: UriScheme -> String -> ByteString -> IO HC.Request
-mkPostRequestWithBody scheme path body = mkTestRequestBS post scheme path (Just body)
+mkPostRequestBS :: UriScheme -> String -> ByteString -> IO HC.Request
+mkPostRequestBS scheme path body = mkTestRequestBS post scheme path (Just body)
+
+
+mkPostRequestBody :: UriScheme -> String -> HC.RequestBody -> IO HC.Request
+mkPostRequestBody scheme path body = mkTestRequest post scheme path (Just body)
 
 
 mkTestRequestBS :: HT.Method -> UriScheme -> String -> Maybe ByteString -> IO HC.Request

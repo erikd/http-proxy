@@ -147,7 +147,7 @@ checkBodySize bodySrc (Just len) = do
         else fromMaybe "Success" <$> (bodySrc DC.$$+- byteSink len)
 
 
-byteSink :: Int64 -> DC.Sink ByteString (ResourceT IO) (Maybe ByteString)
+byteSink :: Monad m => Int64 -> DC.Sink ByteString m (Maybe ByteString)
 byteSink bytes = sink 0
   where
     sink :: Monad m => Int64 -> DC.Sink ByteString m (Maybe ByteString)

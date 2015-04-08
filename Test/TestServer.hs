@@ -13,7 +13,6 @@ module Test.TestServer
     ) where
 
 import Control.Applicative
-import Control.Monad.Trans.Resource
 import Data.ByteString (ByteString)
 import Data.List (sort)
 import Data.String
@@ -66,7 +65,7 @@ serverApp req respond
         let len = maybe 0 readDecimal_ (lookup "content-length" $ requestHeaders req) :: Int64
         if len == 0
             then respond $ simpleResponse status400 "Error : POST Content-Length was either missing or zero.\n"
-            else error "serverApp #4"
+            else respond =<< largePostCheck len (sourceRequestBody req)
 
     | otherwise = do
         let text =
@@ -98,9 +97,9 @@ responseBS :: Status -> ResponseHeaders -> ByteString -> Response
 responseBS status headers text = responseLBS status headers$ LBS.fromChunks [text]
 
 
-largePostCheck :: Int64 -> DC.Source (ResourceT IO) ByteString -> ResourceT IO Response
+largePostCheck :: Int64 -> DC.Source IO ByteString -> IO Response
 largePostCheck len rbody =
     maybe success failure <$> (rbody $$ byteSink len)
   where
-    success = simpleResponse status200 . BS.pack $ "Post-size:" ++ show len
+    success = simpleResponse status200 . BS.pack $ "Post-size: " ++ show len
     failure = simpleResponse status500
