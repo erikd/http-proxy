@@ -146,6 +146,7 @@ proxyApp mgr req respond
         let req2 = req2'
                 { HC.method = Wai.requestMethod req
                 , HC.requestHeaders = filter dropRequestHeader $ Wai.requestHeaders req
+                , HC.redirectCount = 0 -- Always pass redirects back to the client.
                 , HC.requestBody =
                     case Wai.requestBodyLength req of
                         Wai.ChunkedBody ->
