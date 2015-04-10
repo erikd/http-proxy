@@ -129,12 +129,13 @@ testSingleUrl debug request = do
 -- Response contains a Source which we need to read to generate our result.
 httpRun :: HC.Request -> IO Result
 httpRun req = HC.withManagerSettings settings $ \mgr -> do
-    resp <- HC.http req mgr
+    resp <- HC.http (modifyRequest req) mgr
     let contentLen = readInt64 <$> lookup HT.hContentLength (HC.responseHeaders resp)
     bodyText <- checkBodySize (HC.responseBody resp) contentLen
     return $ Result (HC.secure req) (HT.statusCode $ HC.responseStatus resp)
                     (HC.responseHeaders resp) bodyText
   where
+    modifyRequest r = r { HC.redirectCount = 0  }
     settings = HC.mkManagerSettings (TLSSettingsSimple True False False) Nothing
 
 

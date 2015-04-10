@@ -15,6 +15,7 @@ module Test.TestServer
 import Control.Applicative
 import Data.ByteString (ByteString)
 import Data.List (sort)
+import Data.Monoid
 import Data.String
 import Network.HTTP.Types
 import Network.Wai
@@ -52,6 +53,10 @@ serverApp :: Request -> (Response -> IO ResponseReceived) -> IO ResponseReceived
 serverApp req respond
     | rawPathInfo req == "/forbidden" =
         respond $ simpleResponse status403 "This is the forbidden message.\n"
+
+    | rawPathInfo req == "/301" = do
+        let respHeaders = [ (hLocation, "http://other-server" <> rawPathInfo req) ]
+        respond $ responseLBS status301 respHeaders mempty
 
     | rawPathInfo req == "/large-get" = do
         let len = readDecimal_ $ BS.drop 1 $ rawQueryString req

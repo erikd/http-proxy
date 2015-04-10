@@ -40,6 +40,7 @@ runProxyTests :: Bool -> SpecWith ()
 runProxyTests dbg = do
     describe "Test helper functionality:" testHelpersTest
     describe "Simple HTTP proxying:" $ proxyTest Http dbg
+    describe "HTTP protocol:" protocolTest
     describe "Simple HTTPS proxying:" $ proxyTest Https dbg
     describe "HTTP streaming via proxy:" $ streamingTest dbg
 
@@ -64,6 +65,15 @@ proxyTest uris dbg = do
         testSingleUrl dbg =<< mkPostRequest uris "/forbidden"
     it (tname ++ " POST /not-found returns 404.") $
         testSingleUrl dbg =<< mkPostRequest uris "/not-found"
+
+
+protocolTest :: Spec
+protocolTest =
+    it ("Passes  re-directs through to client.") $ do
+        req <- mkGetRequest Http "/301"
+        Result _ status hdrs _ <- httpRun req
+        status `shouldBe` 301
+        lookup HT.hLocation hdrs `shouldBe` Just ("http://other-server/301")
 
 
 testHelpersTest :: Spec
