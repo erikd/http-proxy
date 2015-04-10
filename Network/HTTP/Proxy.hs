@@ -47,6 +47,7 @@ import Data.Monoid
 import Network.Wai.Conduit hiding (Request)
 
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.CaseInsensitive as CI
 import qualified Data.Conduit.Network as NC
 import qualified Network.HTTP.Client as HC
@@ -125,10 +126,10 @@ defaultSettings = Settings
     }
   where
     defaultExceptionResponse :: SomeException -> Wai.Response
-    defaultExceptionResponse _ =
+    defaultExceptionResponse e =
         Wai.responseLBS HT.internalServerError500
                 [ (HT.hContentType, "text/plain; charset=utf-8") ]
-                "Something went wrong in the proxy."
+                $ LBS.fromChunks [BS.pack $ show e]
 
 
 -- -----------------------------------------------------------------------------
