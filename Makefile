@@ -1,7 +1,7 @@
-TARGETS = proxy request-rewrite-proxy testsuite
+TARGETS = debug-proxy request-rewrite-proxy simple-proxy testsuite
 
+GHC = cabal exec -- ghc
 GHCFLAGS = -Wall -fwarn-tabs
-GHC := $(shell if test -f cabal.sandbox.config ; then echo "cabal exec -- ghc $(GHCFLAGS)" ; else echo "ghc $(GHCFLAGS)" ; fi)
 
 HSRC := $(shell find Network Test -name \*.hs)
 
@@ -24,10 +24,13 @@ cabal.sandbox.config :
 #-------------------------------------------------------------------------------
 
 testsuite : $(HSRC)
-	$(GHC) -with-rtsopts="-M64m" -Wall -O2 -threaded Test/testsuite.hs -o $@
+	$(GHC) $(GHCFLAGS) -with-rtsopts="-M64m" -Wall -O2 -threaded Test/testsuite.hs -o $@
 
-proxy : example/proxy.hs $(HSRC)
-	$(GHC) --make $< -o $@
+simple-proxy : example/simple-proxy.hs $(HSRC)
+	$(GHC) $(GHCFLAGS) --make $< -o $@
+
+debug-proxy : example/debug-proxy.hs $(HSRC)
+	$(GHC) $(GHCFLAGS) --make $< -o $@
 
 request-rewrite-proxy : example/request-rewrite-proxy.hs $(HSRC)
-	$(GHC) --make $< -o $@
+	$(GHC) $(GHCFLAGS) --make $< -o $@

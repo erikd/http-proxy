@@ -4,10 +4,7 @@
 cabal.sandbox.config
 connect-test
 dist
-http-to-https-test
-proxy
+simple-proxy
 testsuite
 request-rewrite-proxy
 spellTmp.bak
-streaming-test
-warp-tls-test
