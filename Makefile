@@ -34,3 +34,5 @@ debug-proxy : example/debug-proxy.hs $(HSRC)
 
 request-rewrite-proxy : example/request-rewrite-proxy.hs $(HSRC)
 	$(GHC) $(GHCFLAGS) --make $< -o $@
+
+print-%: ; @echo $*=$($*)
