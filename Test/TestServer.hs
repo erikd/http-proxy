@@ -33,17 +33,18 @@ import qualified Data.Conduit as DC
 
 import qualified Network.HTTP.Proxy.Request as HPR
 
+import Test.ServerDef
 import Test.Util
 
 
-runTestServer :: Int -> IO ()
-runTestServer port =
-    let settings = setPort port $ setHost "*6" defaultSettings
+runTestServer :: IO ()
+runTestServer =
+    let settings = setPort httpTestPort $ setHost "*6" defaultSettings
     in catchAny (runSettings settings serverApp) print
 
-runTestServerTLS :: Int -> IO ()
-runTestServerTLS port =
-    let settings = setPort port $ setHost "*6" defaultSettings
+runTestServerTLS :: IO ()
+runTestServerTLS =
+    let settings = setPort httpsTestPort $ setHost "*6" defaultSettings
         tlsSettings' = tlsSettings "Test/certificate.pem" "Test/key.pem"
     in catchAny (runTLS tlsSettings' settings serverApp) print
 

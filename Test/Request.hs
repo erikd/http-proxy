@@ -26,7 +26,10 @@ import Test.ServerDef
 
 data UriScheme
     = Http | Https
-    deriving Show
+
+instance Show UriScheme where
+    show Http = "HTTP"
+    show Https = "HTTPS"
 
 
 mkGetRequest :: UriScheme -> String -> IO HC.Request

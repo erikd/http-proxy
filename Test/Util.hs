@@ -80,7 +80,12 @@ headerShow headers =
 
 --------------------------------------------------------------------------------
 
-data Result = Result Bool Int [HT.Header] ByteString
+data Result = Result
+    { resultSecure :: Bool
+    , resultStatus :: Int
+    , resultHeaders :: [HT.Header]
+    , resultBS :: ByteString
+    }
 
 
 printResult :: Result -> IO ()
