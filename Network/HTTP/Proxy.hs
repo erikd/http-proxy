@@ -136,28 +136,26 @@ defaultSettings = Settings
 
 
 proxyApp :: HC.Manager -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-proxyApp mgr req respond
-    | Wai.requestMethod req == "CONNECT" =
-            respond $ responseRawSource (handleConnect req)
+proxyApp mgr wreq respond
+    | Wai.requestMethod wreq == "CONNECT" =
+            respond $ responseRawSource (handleConnect wreq)
                     (Wai.responseLBS HT.status500 [("Content-Type", "text/plain")] "No support for responseRaw")
     | otherwise = do
-        -- print (Wai.rawPathInfo req, Wai.rawQueryString req, Wai.requestHeaders req)
-        let url = Wai.rawPathInfo req `mappend` Wai.rawQueryString req
-        req2' <- HC.parseUrl $ BS.unpack url
-        let req2 = req2'
-                { HC.method = Wai.requestMethod req
-                , HC.requestHeaders = filter dropRequestHeader $ Wai.requestHeaders req
+        hreq0 <- HC.parseUrl $ BS.unpack (Wai.rawPathInfo wreq <> Wai.rawQueryString wreq)
+        let hreq = hreq0
+                { HC.method = Wai.requestMethod wreq
+                , HC.requestHeaders = filter dropRequestHeader $ Wai.requestHeaders wreq
                 , HC.redirectCount = 0 -- Always pass redirects back to the client.
                 , HC.requestBody =
-                    case Wai.requestBodyLength req of
+                    case Wai.requestBodyLength wreq of
                         Wai.ChunkedBody ->
-                            HC.requestBodySourceChunkedIO (sourceRequestBody req)
+                            HC.requestBodySourceChunkedIO (sourceRequestBody wreq)
                         Wai.KnownLength l ->
-                            HC.requestBodySourceIO (fromIntegral l) (sourceRequestBody req)
+                            HC.requestBodySourceIO (fromIntegral l) (sourceRequestBody wreq)
                 , HC.decompress = const True
                 , HC.checkStatus = \_ _ _ -> Nothing
                 }
-        HC.withResponse req2 mgr $ \res -> do
+        HC.withResponse hreq mgr $ \res -> do
             let body = mapOutput (Chunk . fromByteString) $ HCC.bodyReaderSource $ HC.responseBody res
                 headers = (CI.mk "X-Via-Proxy", "yes") : filter dropResponseHeader (HC.responseHeaders res)
             respond $ responseSource (HC.responseStatus res) headers body
@@ -170,9 +168,9 @@ proxyApp mgr req respond
 
 
 handleConnect :: Wai.Request -> Source IO BS.ByteString -> Sink BS.ByteString IO () -> IO ()
-handleConnect req fromClient toClient = do
+handleConnect wreq fromClient toClient = do
     let (host, port) =
-            case BS.break (== ':') $ Wai.rawPathInfo req of
+            case BS.break (== ':') $ Wai.rawPathInfo wreq of
                 (x, "") -> (x, 80)
                 (x, y) ->
                     case BS.readInt $ BS.drop 1 y of
