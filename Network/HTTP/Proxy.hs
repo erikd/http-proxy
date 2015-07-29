@@ -76,7 +76,7 @@ runProxy port = runProxySettings $ defaultSettings { proxyPort = port }
 -- | Run a HTTP and HTTPS proxy server with the specified settings.
 runProxySettings :: Settings -> IO ()
 runProxySettings set =
-    HC.newManager HC.conduitManagerSettings
+    HC.newManager HC.tlsManagerSettings
         >>= Warp.runSettings (warpSettings set) . proxyApp
 
 
