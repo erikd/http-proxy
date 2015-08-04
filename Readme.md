@@ -1,5 +1,7 @@
 # http-proxy
 
+[![Build Status](https://secure.travis-ci.org/erikd/http-proxy.png?branch=master)](http://travis-ci.org/erikd/http-proxy)
+
 A Haskell library for creating HTTP and HTTPS web proxies.
 
 The aim is to make all proxying operations work in constant space (per
