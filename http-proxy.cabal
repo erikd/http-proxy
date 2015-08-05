@@ -36,7 +36,7 @@ Library
                    , conduit-extra           >= 1.1
                    , hspec                   >= 2.1
                    , http-client             >= 0.4
-                   , http-conduit            >= 2.1
+                   , http-conduit            >= 2.1.7
                    , http-types              >= 0.8
                    , mtl                     >= 2.1
                    , resourcet               >= 1.1
