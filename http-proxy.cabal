@@ -28,13 +28,12 @@ Description:
 Library
   Build-Depends:     base                    >= 4           && < 5
                    , async                   >= 2.0
-                   , blaze-builder           >= 0.3
+                   , blaze-builder           >= 0.4
                    , bytestring              >= 0.10
                    , bytestring-lexing       >= 0.4
                    , case-insensitive        >= 1.2
                    , conduit                 >= 1.2
                    , conduit-extra           >= 1.1
-                   , hspec                   >= 2.1
                    , http-client             >= 0.4
                    , http-conduit            >= 2.1.7
                    , http-types              >= 0.8
@@ -49,6 +48,32 @@ Library
 
   Exposed-modules:   Network.HTTP.Proxy
   Other-modules:     Network.HTTP.Proxy.Request
+
+  ghc-options:       -Wall -fwarn-tabs
+  if os(windows)
+      Cpp-options: -DWINDOWS
+
+Test-Suite testsuite
+  Type: exitcode-stdio-1.0
+  Main-is: Test/testsuite.hs
+  build-depends:     base
+                   , async
+                   , blaze-builder
+                   , bytestring
+                   , bytestring-lexing
+                   , case-insensitive
+                   , conduit
+                   , connection              >= 0.2
+                   , conduit-extra
+                   , http-client
+                   , http-conduit
+                   , http-types
+                   , hspec                   >= 2.1
+                   , resourcet
+                   , wai
+                   , wai-conduit
+                   , warp
+                   , warp-tls
 
   ghc-options:       -Wall -fwarn-tabs
   if os(windows)
