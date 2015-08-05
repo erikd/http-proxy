@@ -39,12 +39,12 @@ import Test.Util
 
 runTestServer :: IO ()
 runTestServer =
-    let settings = setPort httpTestPort $ setHost "*6" defaultSettings
+    let settings = setPort (httpTestPort portsDef) $ setHost "*6" defaultSettings
     in catchAny (runSettings settings serverApp) print
 
 runTestServerTLS :: IO ()
 runTestServerTLS =
-    let settings = setPort httpsTestPort $ setHost "*6" defaultSettings
+    let settings = setPort (httpsTestPort portsDef) $ setHost "*6" defaultSettings
         tlsSettings' = tlsSettings "Test/certificate.pem" "Test/key.pem"
     in catchAny (runTLS tlsSettings' settings serverApp) print
 

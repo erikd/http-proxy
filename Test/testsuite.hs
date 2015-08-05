@@ -137,5 +137,5 @@ withProxy settings = around_ $
 defaultProxySettings :: Settings
 defaultProxySettings = defaultSettings
                     { proxyHost = "*6"
-                    , proxyPort = testProxyPort
+                    , proxyPort = proxyTestPort portsDef
                     }

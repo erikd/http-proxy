@@ -123,7 +123,7 @@ compareResult (Result secure sa ha ba) (Result _ sb hb bb) = do
 testSingleUrl :: Bool -> HC.Request -> IO ()
 testSingleUrl debug request = do
     direct <- httpRun request
-    proxy <- httpRun $ HC.addProxy "localhost" testProxyPort request
+    proxy <- httpRun $ HC.addProxy "localhost" (proxyTestPort portsDef) request
     when debug $ do
         printResult direct
         printResult proxy

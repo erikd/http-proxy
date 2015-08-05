@@ -69,6 +69,7 @@ Test-Suite testsuite
                    , http-conduit
                    , http-types
                    , hspec                   >= 2.1
+                   , random                  >= 1.1
                    , resourcet
                    , wai
                    , wai-conduit

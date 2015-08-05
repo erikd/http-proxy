@@ -59,8 +59,8 @@ mkTestRequestBS method scheme path mbody = mkTestRequest method scheme path $ HC
 mkTestRequest :: HT.Method -> UriScheme -> String -> Maybe HC.RequestBody -> IO HC.Request
 mkTestRequest method scheme path mbody = do
     let port = show $ case scheme of
-                        Http -> httpTestPort
-                        Https -> httpsTestPort
+                        Http -> httpTestPort portsDef
+                        Https -> httpsTestPort portsDef
         url = map toLower (show scheme) ++ "://localhost:" ++ port ++ path
     req <- HC.parseUrl url
     return $ req
