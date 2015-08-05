@@ -22,6 +22,7 @@ data PortsDef = PortsDef
 
 -- Yeah, yeah, unsafePerformIO! Worst thing that can happen is that the tests
 -- fail.
+{-# NOINLINE portsDef #-}
 portsDef :: PortsDef
 portsDef = unsafePerformIO getPortsDef
 
