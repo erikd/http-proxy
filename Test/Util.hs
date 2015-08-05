@@ -133,18 +133,19 @@ testSingleUrl debug request = do
 -- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
 -- Response contains a Source which we need to read to generate our result.
 httpRun :: HC.Request -> IO Result
-httpRun req = HC.withManagerSettings settings $ \mgr -> do
-    resp <- HC.http (modifyRequest req) mgr
-    let contentLen = readInt64 <$> lookup HT.hContentLength (HC.responseHeaders resp)
-    bodyText <- checkBodySize (HC.responseBody resp) contentLen
-    return $ Result (HC.secure req) (HT.statusCode $ HC.responseStatus resp)
-                    (HC.responseHeaders resp) bodyText
+httpRun req = do
+    mgr <- HC.newManager $ HC.mkManagerSettings (TLSSettingsSimple True False False) Nothing
+    runResourceT $ do
+        resp <- HC.http (modifyRequest req) mgr
+        let contentLen = readInt64 <$> lookup HT.hContentLength (HC.responseHeaders resp)
+        bodyText <- checkBodySize (HC.responseBody resp) contentLen
+        return $ Result (HC.secure req) (HT.statusCode $ HC.responseStatus resp)
+                        (HC.responseHeaders resp) bodyText
   where
     modifyRequest r = r { HC.redirectCount = 0  }
-    settings = HC.mkManagerSettings (TLSSettingsSimple True False False) Nothing
 
 
-checkBodySize :: DC.ResumableSource (ResourceT IO) ByteString -> Maybe Int64 -> ResourceT IO ByteString
+checkBodySize :: (Monad f, Functor f) => DC.ResumableSource f ByteString -> Maybe Int64 -> f ByteString
 checkBodySize bodySrc Nothing = fmap (BS.concat . LBS.toChunks) $ bodySrc DC.$$+- CB.take 1000
 checkBodySize bodySrc (Just len) = do
     let blockSize = 1000
