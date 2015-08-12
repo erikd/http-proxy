@@ -11,13 +11,17 @@ import Control.Monad.Trans.Resource
 import Data.Conduit
 import Data.Int (Int64)
 import Test.Hspec
+import Test.Hspec.QuickCheck
 
 import qualified Data.ByteString.Char8 as BS
 import qualified Network.HTTP.Conduit as HC
 import qualified Network.HTTP.Types as HT
 
 import Network.HTTP.Proxy
+import Network.HTTP.Proxy.Request
 
+import Test.Gen
+import Test.QuickCheck
 import Test.TestServer
 import Test.Util
 import Test.Request
@@ -34,7 +38,6 @@ main =
         (mapM_ cancel)
         (const $ runProxyTests proxyTestDebug)
 
-
 runProxyTests :: Bool -> IO ()
 runProxyTests dbg = hspec $ do
     testHelpersTest
@@ -42,6 +45,7 @@ runProxyTests dbg = hspec $ do
     protocolTest
     proxyTest Https dbg
     streamingTest dbg
+    properties
 
 -- -----------------------------------------------------------------------------
 
@@ -139,3 +143,9 @@ defaultProxySettings = defaultSettings
                     { proxyHost = "*6"
                     , proxyPort = proxyTestPort portsDef
                     }
+
+-- QuickCheck tests.
+properties :: Spec
+properties = describe "Request" $
+    prop "Roundtrips with waiRequest." $ forAll request $ \r ->
+        r `shouldBe` ((proxyRequest . waiRequest) r)

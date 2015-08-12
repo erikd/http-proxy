@@ -38,7 +38,7 @@ data Request = Request
     , requestPath :: ByteString
     -- | Parsed query string information
     , queryString :: HT.Query
-    }
+    } deriving (Show, Eq)
 
 proxyRequest :: Wai.Request -> Request
 proxyRequest w = Request method'
