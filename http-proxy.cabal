@@ -38,6 +38,8 @@ Library
                    , http-conduit            >= 2.1.7
                    , http-types              >= 0.8
                    , mtl                     >= 2.1
+                   , network-uri             >= 2.6
+                   , QuickCheck
                    , resourcet               >= 1.1
                    , tls                     >= 1.2
                    , text                    >= 1.2
@@ -49,6 +51,7 @@ Library
 
   Exposed-modules:   Network.HTTP.Proxy
   Other-modules:     Network.HTTP.Proxy.Request
+                     Network.HTTP.Proxy.Request.Arbitrary
 
   ghc-options:       -Wall -fwarn-tabs
   if os(windows)
@@ -70,6 +73,7 @@ Test-Suite testsuite
                    , http-conduit
                    , http-types
                    , hspec                   >= 2.1
+                   , QuickCheck
                    , network
                    , random                  >= 1.1
                    , resourcet
