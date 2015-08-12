@@ -34,8 +34,7 @@ data Request = Request
     , httpVersion :: HT.HttpVersion
     -- | A list of header (a pair of key and value) in an HTTP request.
     , requestHeaders :: HT.RequestHeaders
-    -- | The part of the URL after the hostname (and optional port number) and
-    -- before the query part.
+    -- | The part of the URL before the query part.
     , requestPath :: ByteString
     -- | Parsed query string information
     , queryString :: HT.Query
