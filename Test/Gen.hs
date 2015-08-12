@@ -1,13 +1,12 @@
 {-# LANGUAGE OverloadedStrings    #-}
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 ------------------------------------------------------------
 -- Copyright : Ambiata Pty Ltd
 -- Author : Sharif Olorin <sio@tesser.org>
 -- License : BSD3
 ------------------------------------------------------------
 
-module Network.HTTP.Proxy.Request.Arbitrary(
-    Request ()
+module Test.Gen(
+    request
 ) where
 
 import Data.ByteString.Char8 (ByteString)
@@ -32,11 +31,11 @@ stdMethod = elements [ "GET"
                      , "PATCH"
                      ]
 
-instance Arbitrary HttpVersion where
-    arbitrary = elements [ http09
-                         , http10
-                         , http11
-                         ]
+version :: Gen HttpVersion
+version = elements [ http09
+                   , http10
+                   , http11
+                   ]
 
 ascii :: Gen ByteString
 ascii = BS.pack <$> (listOf1 (oneof [choose ('a', 'z'), choose ('0', '9')]))
@@ -54,11 +53,10 @@ simpleUri = do
         , "/" <> (BS.intercalate "/" path')
         ]
 
--- The logic here should probably go into the Request type itself at some point.
-instance Arbitrary Request where
-    arbitrary = do
+request :: Gen Request
+request = do
         method' <- stdMethod
-        version' <- arbitrary
+        version' <- version
         uri' <- simpleUri
         headers' <- listOf header
         qs' <- listOf qi
