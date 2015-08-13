@@ -40,6 +40,7 @@ Library
                    , mtl                     >= 2.1
                    , resourcet               >= 1.1
                    , tls                     >= 1.2
+                   , text                    >= 1.2
                    , transformers            >= 0.3
                    , wai                     >= 3.0
                    , wai-conduit             >= 3.0
@@ -69,8 +70,11 @@ Test-Suite testsuite
                    , http-conduit
                    , http-types
                    , hspec                   >= 2.1
+                   , network
+                   , QuickCheck              >= 2.7
                    , random                  >= 1.1
                    , resourcet
+                   , text
                    , wai
                    , wai-conduit
                    , warp
