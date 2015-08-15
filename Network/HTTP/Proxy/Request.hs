@@ -15,10 +15,9 @@ module Network.HTTP.Proxy.Request
     where
 
 import Data.ByteString.Char8 (ByteString)
-
 import Data.Maybe
+import Network.HTTP.Types (Method)
 
-import           Network.HTTP.Types (Method)
 import qualified Network.HTTP.Types as HT
 import qualified Network.Wai as Wai
 
@@ -40,18 +39,14 @@ data Request = Request
     , queryString :: HT.Query
     } deriving (Show, Eq)
 
+
 proxyRequest :: Wai.Request -> Request
-proxyRequest w = Request method'
-                         version'
-                         headers'
-                         path'
-                         query'
-         where
-    method'  = Wai.requestMethod w
-    version' = Wai.httpVersion w
-    headers' = Wai.requestHeaders w
-    path'    = Wai.rawPathInfo w
-    query'   = Wai.queryString w
+proxyRequest w = Request (Wai.requestMethod w)
+                         (Wai.httpVersion w)
+                         (Wai.requestHeaders w)
+                         (Wai.rawPathInfo w)
+                         (Wai.queryString w)
+
 
 waiRequest :: Request -> Wai.Request
 waiRequest r = Wai.defaultRequest
@@ -61,6 +56,7 @@ waiRequest r = Wai.defaultRequest
     , Wai.rawPathInfo    = requestPath r
     , Wai.queryString    = queryString r
     }
+
 
 waiRequestHost :: Wai.Request -> ByteString
 waiRequestHost req = fromMaybe "???" $ Wai.requestHeaderHost req

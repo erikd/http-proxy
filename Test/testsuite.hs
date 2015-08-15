@@ -45,7 +45,7 @@ runProxyTests dbg = hspec $ do
     protocolTest
     proxyTest Https dbg
     streamingTest dbg
-    properties
+    requestTest
 
 -- -----------------------------------------------------------------------------
 
@@ -122,6 +122,14 @@ streamingTest dbg = withProxy defaultProxySettings $
                 let body = HC.requestBodySourceIO size $ byteSource size
                 testSingleUrl dbg =<< mkPostRequestBody Http ("/large-post?" ++ show size) body
 
+
+-- Test that a Request can be pulled apart and reconstructed without losing
+-- anything.
+requestTest :: Spec
+requestTest = describe "Request" $
+    prop "Roundtrips with waiRequest." $ forAll genRequest $ \r ->
+        r `shouldBe` (proxyRequest . waiRequest) r
+
 -- -----------------------------------------------------------------------------
 
 oneThousand, oneMillion, oneBillion :: Int64
@@ -144,8 +152,3 @@ defaultProxySettings = defaultSettings
                     , proxyPort = proxyTestPort portsDef
                     }
 
--- QuickCheck tests.
-properties :: Spec
-properties = describe "Request" $
-    prop "Roundtrips with waiRequest." $ forAll request $ \r ->
-        r `shouldBe` ((proxyRequest . waiRequest) r)

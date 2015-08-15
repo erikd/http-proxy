@@ -5,72 +5,65 @@
 -- License : BSD3
 ------------------------------------------------------------
 
-module Test.Gen(
-    request
-) where
+module Test.Gen
+    ( genRequest
+    ) where
 
-import Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString.Char8 as BS
-import Data.CaseInsensitive
-import Data.Monoid
 import Control.Applicative
+import Data.ByteString.Char8 (ByteString)
+import Data.CaseInsensitive
 import Network.HTTP.Proxy.Request
 import Network.HTTP.Types
 import Test.QuickCheck
 
+import qualified Data.ByteString.Char8 as BS
 
-stdMethod :: Gen ByteString
-stdMethod = elements [ "GET"
-                     , "POST"
-                     , "HEAD"
-                     , "PUT"
-                     , "DELETE"
-                     , "TRACE"
-                     , "CONNECT"
-                     , "OPTIONS"
-                     , "PATCH"
-                     ]
 
-version :: Gen HttpVersion
-version = elements [ http09
-                   , http10
-                   , http11
-                   ]
+genRequest :: Gen Request
+genRequest =
+    Request <$> genHttpMethod <*> genHttpVersion <*> genHeaderList <*> genSimpleUri <*> genQueryItemList
 
-ascii :: Gen ByteString
-ascii = BS.pack <$> (listOf1 (oneof [choose ('a', 'z'), choose ('0', '9')]))
+genHttpMethod :: Gen ByteString
+genHttpMethod = elements
+                [ "GET", "POST", "HEAD", "PUT", "DELETE", "TRACE", "CONNECT"
+                , "OPTIONS", "PATCH"
+                ]
 
-simpleUri :: Gen ByteString
-simpleUri = do
-    scheme' <- elements ["http://", "https://"]
-    host' <- listOf1 ascii
-    port' <- oneof [Just <$> ((arbitrary :: Gen Int) `suchThat` (> 0)), pure Nothing]
-    path' <- listOf ascii
-    pure . BS.concat $
-        [ scheme'
-        , BS.intercalate "." host'
-        , maybe "" (BS.pack . ((:) ':') . show) port'
-        , "/" <> (BS.intercalate "/" path')
-        ]
+genHttpVersion :: Gen HttpVersion
+genHttpVersion = elements [ http09, http10, http11 ]
 
-request :: Gen Request
-request = do
-        method' <- stdMethod
-        version' <- version
-        uri' <- simpleUri
-        headers' <- listOf header
-        qs' <- listOf qi
-        pure $ Request method'
-                       version'
-                       headers'
-                       uri'
-                       qs'
-      where
-        header :: Gen Header
-        header = (,) <$> ci <*> ascii
+genSimpleUri :: Gen ByteString
+genSimpleUri = BS.concat <$> sequence
+    [ elements [ "http://", "https://" ]
+    , BS.intercalate "." <$> listOf1 genAscii
+    , genMaybePortStr
+    , pure "/"
+    , BS.intercalate "/" <$> listOf genAscii
+    ]
 
-        qi :: Gen QueryItem
-        qi = (,) <$> ascii <*> oneof [Just <$> ascii, pure Nothing]
+genMaybePortStr :: Gen ByteString
+genMaybePortStr = oneof
+    [ pure ""
+    , BS.pack . (:) ':' . show <$> genPort
+    ]
 
-        ci :: Gen (CI ByteString)
-        ci = mk <$> ascii
+genPort :: Gen Int
+genPort = arbitrary `suchThat` (\x -> x > 0 && x < 65536)
+
+genHeaderList :: Gen [Header]
+genHeaderList = listOf genHeader
+
+genHeader :: Gen Header
+genHeader = (,) <$> genHeaderName <*> genAscii
+
+genQueryItemList :: Gen [QueryItem]
+genQueryItemList = listOf genQueryItem
+
+genQueryItem :: Gen QueryItem
+genQueryItem = (,) <$> genAscii <*> oneof [Just <$> genAscii, pure Nothing]
+
+genHeaderName :: Gen (CI ByteString)
+genHeaderName = mk <$> genAscii
+
+genAscii :: Gen ByteString
+genAscii = BS.pack <$> listOf1 (oneof [choose ('a', 'z'), choose ('0', '9')])
