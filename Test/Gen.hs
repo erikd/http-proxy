@@ -11,17 +11,19 @@ module Test.Gen
 
 import Control.Applicative
 import Data.ByteString.Char8 (ByteString)
-import Data.CaseInsensitive
+import Data.CaseInsensitive (CI)
+import Data.Monoid ((<>))
 import Network.HTTP.Proxy.Request
 import Network.HTTP.Types
 import Test.QuickCheck
 
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.CaseInsensitive as CI
 
 
 genRequest :: Gen Request
 genRequest =
-    Request <$> genHttpMethod <*> genHttpVersion <*> genHeaderList <*> genSimpleUri <*> genQueryItemList
+    Request <$> genHttpMethod <*> genHttpVersion <*> genHeaderList <*> genSimpleUri <*> genQueryString
 
 genHttpMethod :: Gen ByteString
 genHttpMethod = elements
@@ -56,14 +58,23 @@ genHeaderList = listOf genHeader
 genHeader :: Gen Header
 genHeader = (,) <$> genHeaderName <*> genAscii
 
-genQueryItemList :: Gen [QueryItem]
-genQueryItemList = listOf genQueryItem
+genHeaderName :: Gen (CI ByteString)
+genHeaderName = CI.mk <$> genAscii
+
+genQueryString :: Gen ByteString
+genQueryString = do
+    list <- genQuery
+    case list of
+        [] -> pure ""
+        _ -> return $ "?" <> BS.intercalate "&" (map mkPair list)
+  where
+    mkPair (name, value) = name <> maybe "" ("=" <>) value
+
+genQuery :: Gen Query
+genQuery = listOf genQueryItem
 
 genQueryItem :: Gen QueryItem
 genQueryItem = (,) <$> genAscii <*> oneof [Just <$> genAscii, pure Nothing]
-
-genHeaderName :: Gen (CI ByteString)
-genHeaderName = mk <$> genAscii
 
 genAscii :: Gen ByteString
 genAscii = BS.pack <$> listOf1 (oneof [choose ('a', 'z'), choose ('0', '9')])
