@@ -4,6 +4,7 @@
 -- License : BSD3
 ------------------------------------------------------------
 
+import Control.Applicative
 import Control.Concurrent.Async
 import Control.Exception
 import Control.Monad
@@ -14,6 +15,7 @@ import Test.Hspec
 import Test.Hspec.QuickCheck
 
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.CaseInsensitive as CI
 import qualified Network.HTTP.Conduit as HC
 import qualified Network.HTTP.Types as HT
 
@@ -126,9 +128,14 @@ streamingTest dbg = withProxy defaultProxySettings $
 -- Test that a Request can be pulled apart and reconstructed without losing
 -- anything.
 requestTest :: Spec
-requestTest = describe "Request" $
-    prop "Roundtrips with waiRequest." $ forAll genRequest $ \r ->
-        r `shouldBe` (proxyRequest . waiRequest) r
+requestTest = describe "Request:" $ do
+    prop "Roundtrips with waiRequest." $ forAll genRequest $ \req ->
+        req `shouldBe` (proxyRequest . waiRequest) req
+    it "Can add a request header." $
+        proxyExpect proxySettingsAddHeader $ do
+            req <- addTestProxy <$> mkGetRequest Http "/whatever"
+            result <- httpRun req
+            "X-Test-Header: Blah" `BS.isInfixOf` resultBS result `shouldBe` True
 
 -- -----------------------------------------------------------------------------
 
@@ -139,11 +146,11 @@ oneBillion = oneThousand * oneMillion
 
 
 withProxy :: Settings -> SpecWith a -> SpecWith a
-withProxy settings = around_ $
-    bracket
-        (async $ runProxySettings settings)
-        cancel
-        . const
+withProxy = around_ . proxyExpect
+
+
+proxyExpect :: Settings -> Expectation -> Expectation
+proxyExpect settings = bracket (async $ runProxySettings settings) cancel . const
 
 
 defaultProxySettings :: Settings
@@ -152,3 +159,10 @@ defaultProxySettings = defaultSettings
                     , proxyPort = proxyTestPort portsDef
                     }
 
+
+proxySettingsAddHeader :: Settings
+proxySettingsAddHeader = defaultProxySettings
+    { proxyRequestModifier = \ req -> return $ req
+                { requestHeaders = (CI.mk "X-Test-Header", "Blah") : requestHeaders req
+                }
+    }

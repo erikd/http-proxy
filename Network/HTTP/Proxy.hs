@@ -38,6 +38,7 @@ module Network.HTTP.Proxy
     where
 
 import Blaze.ByteString.Builder (fromByteString)
+import Control.Applicative
 import Control.Concurrent.Async (race_)
 import Control.Exception (SomeException)
 import Data.ByteString.Char8 (ByteString)
@@ -77,7 +78,7 @@ runProxy port = runProxySettings $ defaultSettings { proxyPort = port }
 runProxySettings :: Settings -> IO ()
 runProxySettings set =
     HC.newManager HC.tlsManagerSettings
-        >>= Warp.runSettings (warpSettings set) . proxyApp
+        >>= Warp.runSettings (warpSettings set) . proxyApp set
 
 
 -- | Various proxy server settings. This is purposely kept as an abstract data
@@ -91,7 +92,7 @@ data Settings = Settings
     , proxyHost :: HostPreference -- ^ Default value: HostIPv4
     , proxyOnException :: SomeException -> Wai.Response -- ^ What to do with exceptions thrown by either the application or server. Default: ignore server-generated exceptions (see 'InvalidRequest') and print application-generated applications to stderr.
     , proxyTimeout :: Int -- ^ Timeout value in seconds. Default value: 30
-    , proxyRequestModifier :: Maybe (Request -> IO Request) -- ^ A function that allows the the request to be modified before being run. Default: 'return . id'.
+    , proxyRequestModifier :: Request -> IO Request -- ^ A function that allows the the request to be modified before being run. Default: 'return'.
     , proxyLogger :: ByteString -> IO () -- ^ A function for logging proxy internal state. Default: 'return ()'.
     , proxyUpstream :: Maybe UpstreamProxy -- ^ Optional upstream proxy.
     }
@@ -120,8 +121,8 @@ defaultSettings = Settings
     , proxyHost = "*"
     , proxyOnException = defaultExceptionResponse
     , proxyTimeout = 30
-    , proxyRequestModifier = Nothing
-    , proxyLogger = \ _ -> return ()
+    , proxyRequestModifier = return
+    , proxyLogger = const $ return ()
     , proxyUpstream = Nothing
     }
   where
@@ -131,20 +132,19 @@ defaultSettings = Settings
                 [ (HT.hContentType, "text/plain; charset=utf-8") ]
                 $ LBS.fromChunks [BS.pack $ show e]
 
-
 -- -----------------------------------------------------------------------------
 
-
-proxyApp :: HC.Manager -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-proxyApp mgr wreq respond
+proxyApp :: Settings -> HC.Manager -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+proxyApp settings mgr wreq respond
     | Wai.requestMethod wreq == "CONNECT" =
             respond $ responseRawSource (handleConnect wreq)
                     (Wai.responseLBS HT.status500 [("Content-Type", "text/plain")] "No support for responseRaw")
     | otherwise = do
-        hreq0 <- HC.parseUrl $ BS.unpack (Wai.rawPathInfo wreq <> Wai.rawQueryString wreq)
+        wreq' <- waiRequest <$> proxyRequestModifier settings (proxyRequest wreq)
+        hreq0 <- HC.parseUrl $ BS.unpack (Wai.rawPathInfo wreq' <> Wai.rawQueryString wreq')
         let hreq = hreq0
-                { HC.method = Wai.requestMethod wreq
-                , HC.requestHeaders = filter dropRequestHeader $ Wai.requestHeaders wreq
+                { HC.method = Wai.requestMethod wreq'
+                , HC.requestHeaders = filter dropRequestHeader $ Wai.requestHeaders wreq'
                 , HC.redirectCount = 0 -- Always pass redirects back to the client.
                 , HC.requestBody =
                     case Wai.requestBodyLength wreq of
