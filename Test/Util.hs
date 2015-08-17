@@ -123,11 +123,15 @@ compareResult (Result secure sa ha ba) (Result _ sb hb bb) = do
 testSingleUrl :: Bool -> HC.Request -> IO ()
 testSingleUrl debug request = do
     direct <- httpRun request
-    proxy <- httpRun $ HC.addProxy "localhost" (proxyTestPort portsDef) request
+    proxy <- httpRun $ addTestProxy request
     when debug $ do
         printResult direct
         printResult proxy
     compareResult direct proxy
+
+
+addTestProxy :: HC.Request -> HC.Request
+addTestProxy = HC.addProxy "localhost" (proxyTestPort portsDef)
 
 
 -- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
