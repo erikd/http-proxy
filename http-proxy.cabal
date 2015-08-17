@@ -86,4 +86,4 @@ Test-Suite testsuite
 
 source-repository head
   type:     git
-  location: git://github.com/erikd/http-proxy.git
+  location: https://github.com/erikd/http-proxy.git
