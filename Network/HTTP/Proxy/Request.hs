@@ -41,20 +41,20 @@ data Request = Request
 
 
 proxyRequest :: Wai.Request -> Request
-proxyRequest w = Request (Wai.requestMethod w)
-                         (Wai.httpVersion w)
-                         (Wai.requestHeaders w)
-                         (Wai.rawPathInfo w)
-                         (Wai.rawQueryString w)
-
+proxyRequest wreq = Request
+                        (Wai.requestMethod wreq)
+                        (Wai.httpVersion wreq)
+                        (Wai.requestHeaders wreq)
+                        (Wai.rawPathInfo wreq)
+                        (Wai.rawQueryString wreq)
 
 waiRequest :: Request -> Wai.Request
-waiRequest r = Wai.defaultRequest
-    { Wai.requestMethod  = requestMethod r
-    , Wai.httpVersion    = httpVersion r
-    , Wai.requestHeaders = requestHeaders r
-    , Wai.rawPathInfo    = requestPath r
-    , Wai.rawQueryString = queryString r
+waiRequest req = Wai.defaultRequest
+    { Wai.requestMethod  = requestMethod req
+    , Wai.httpVersion    = httpVersion req
+    , Wai.requestHeaders = requestHeaders req
+    , Wai.rawPathInfo    = requestPath req
+    , Wai.rawQueryString = queryString req
     }
 
 
