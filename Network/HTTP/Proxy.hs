@@ -111,6 +111,8 @@ warpSettings :: Settings -> Warp.Settings
 warpSettings pset = Warp.setPort (proxyPort pset)
     . Warp.setHost (proxyHost pset)
     . Warp.setTimeout (proxyTimeout pset)
+    . Warp.setOnException (\ _ _ -> return ())
+    . Warp.setOnExceptionResponse defaultExceptionResponse
     $ Warp.setNoParsePath True Warp.defaultSettings
 
 -- | The default settings for the Proxy server. See the individual settings for
@@ -125,9 +127,9 @@ defaultSettings = Settings
     , proxyLogger = const $ return ()
     , proxyUpstream = Nothing
     }
-  where
-    defaultExceptionResponse :: SomeException -> Wai.Response
-    defaultExceptionResponse e =
+
+defaultExceptionResponse :: SomeException -> Wai.Response
+defaultExceptionResponse e =
         Wai.responseLBS HT.internalServerError500
                 [ (HT.hContentType, "text/plain; charset=utf-8") ]
                 $ LBS.fromChunks [BS.pack $ show e]
