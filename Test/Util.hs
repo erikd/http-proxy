@@ -77,6 +77,22 @@ headerShow headers =
   where
     hdrShow (f, v) = BS.concat [ "    ", CI.original f , ": " , v, "\n" ]
 
+
+--------------------------------------------------------------------------------
+
+simpleResponse :: HT.Status -> ByteString -> Wai.Response
+simpleResponse status text = do
+    let respHeaders =
+            [ (HT.hContentType, "text/plain")
+            , (HT.hContentLength, fromString . show $ BS.length text)
+            ]
+    responseBS status respHeaders text
+
+
+responseBS :: HT.Status -> HT.ResponseHeaders -> ByteString -> Wai.Response
+responseBS status headers text =
+    Wai.responseLBS status headers$ LBS.fromChunks [text]
+
 --------------------------------------------------------------------------------
 
 data Result = Result

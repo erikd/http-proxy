@@ -98,20 +98,6 @@ responseBody req =
     ]
 
 
-
-simpleResponse :: Status -> ByteString -> Response
-simpleResponse status text = do
-    let respHeaders =
-            [ (hContentType, "text/plain")
-            , (hContentLength, fromString . show $ BS.length text)
-            ]
-    responseBS status respHeaders text
-
-
-responseBS :: Status -> ResponseHeaders -> ByteString -> Response
-responseBS status headers text = responseLBS status headers$ LBS.fromChunks [text]
-
-
 largePostCheck :: Int64 -> DC.Source IO ByteString -> IO Response
 largePostCheck len rbody =
     maybe success failure <$> (rbody $$ byteSink len)

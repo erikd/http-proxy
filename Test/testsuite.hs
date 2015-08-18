@@ -19,6 +19,7 @@ import qualified Data.ByteString.Char8 as BS
 import qualified Data.CaseInsensitive as CI
 import qualified Network.HTTP.Conduit as HC
 import qualified Network.HTTP.Types as HT
+import qualified Network.Wai as Wai
 
 import Network.HTTP.Proxy
 import Network.HTTP.Proxy.Request
@@ -147,6 +148,11 @@ requestTest = describe "Request:" $ do
             -- from HTTP to HTTPS. Its not possible to ignore this failure
             -- because its made by the http-conduit inside the proxy.
             BS.takeWhile (/= ' ') (resultBS result) `shouldBe` "TlsException"
+    it "Can provide a proxy Response." $
+        withTestProxy proxySettingsProxyResponse $ \ testProxyPort -> do
+            req <- addTestProxy testProxyPort <$> mkGetRequest Http "/whatever"
+            result <- httpRun req
+            resultBS result `shouldBe` "This is the proxy reqponse"
 
 -- -----------------------------------------------------------------------------
 
@@ -170,14 +176,14 @@ withTestProxy settings expectation = do
 
 proxySettingsAddHeader :: Settings
 proxySettingsAddHeader = defaultSettings
-    { proxyRequestModifier = \ req -> return $ req
+    { proxyRequestModifier = \ req -> return . Right $ req
                 { requestHeaders = (CI.mk "X-Test-Header", "Blah") : requestHeaders req
                 }
     }
 
 proxySettingsHttpsUpgrade :: Settings
 proxySettingsHttpsUpgrade = defaultSettings
-    { proxyRequestModifier = \ req -> return $ req { requestPath = httpsUpgrade $ requestPath req }
+    { proxyRequestModifier = \ req -> return . Right $ req { requestPath = httpsUpgrade $ requestPath req }
     }
   where
     httpsUpgrade bs =
@@ -185,3 +191,11 @@ proxySettingsHttpsUpgrade = defaultSettings
             https = bsShow $ httpsTestPort portsDef
         in "https" <> BS.drop 4 start <> https <> BS.drop 5 end
     bsShow = BS.pack . show
+
+proxySettingsProxyResponse :: Settings
+proxySettingsProxyResponse = defaultSettings
+    { proxyRequestModifier = const . return $ Left proxyResponse
+    }
+  where
+    proxyResponse :: Wai.Response
+    proxyResponse = simpleResponse HT.status200 "This is the proxy reqponse"
