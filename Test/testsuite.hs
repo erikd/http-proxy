@@ -11,6 +11,7 @@ import Control.Monad
 import Control.Monad.Trans.Resource
 import Data.Conduit
 import Data.Int (Int64)
+import Data.Monoid
 import Test.Hspec
 import Test.Hspec.QuickCheck
 
@@ -136,6 +137,14 @@ requestTest = describe "Request:" $ do
             req <- addTestProxy <$> mkGetRequest Http "/whatever"
             result <- httpRun req
             "X-Test-Header: Blah" `BS.isInfixOf` resultBS result `shouldBe` True
+    it "Can rewrite HTTP to HTTPS." $
+        proxyExpect proxySettingsHttpsUpgrade $ do
+            req <- addTestProxy <$> mkGetRequest Http "/secure"
+            result <- httpRun req
+            -- Getting a TlsException shows that we have successfully upgraded
+            -- from HTTP to HTTPS. Its not possible to ignore this failure
+            -- because its made by the http-conduit inside the proxy.
+            BS.takeWhile (/= ' ') (resultBS result) `shouldBe` "TlsException"
 
 -- -----------------------------------------------------------------------------
 
@@ -166,3 +175,14 @@ proxySettingsAddHeader = defaultProxySettings
                 { requestHeaders = (CI.mk "X-Test-Header", "Blah") : requestHeaders req
                 }
     }
+
+proxySettingsHttpsUpgrade :: Settings
+proxySettingsHttpsUpgrade = defaultProxySettings
+    { proxyRequestModifier = \ req -> return $ req { requestPath = httpsUpgrade $ requestPath req }
+    }
+  where
+    httpsUpgrade bs =
+        let (start, end) = BS.breakSubstring (bsShow $ httpTestPort portsDef) bs
+            https = bsShow $ httpsTestPort portsDef
+        in "https" <> BS.drop 4 start <> https <> BS.drop 5 end
+    bsShow = BS.pack . show

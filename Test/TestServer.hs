@@ -7,9 +7,6 @@
 module Test.TestServer
     ( runTestServer
     , runTestServerTLS
-
-    -- Add this here for now to avoid warnings.
-    , largePostCheck
     ) where
 
 import Control.Applicative
@@ -67,6 +64,14 @@ serverApp req respond
                 ]
         respond . responseSource status200 respHeaders $ builderSource len
 
+    | rawPathInfo req == "/secure" = do
+        let body = "Using SSL: " <> BS.pack (show $ isSecure req)
+        let respHeaders =
+                [ (hContentType, "text/plain")
+                , (hContentLength, fromString . show $ BS.length body)
+                ]
+        respond $ responseBS status200 respHeaders body
+
     | rawPathInfo req == "/large-post" && requestMethod req == "POST" = do
         let len = maybe 0 readDecimal_ (lookup "content-length" $ requestHeaders req) :: Int64
         if len == 0
@@ -74,20 +79,24 @@ serverApp req respond
             else respond =<< largePostCheck len (sourceRequestBody req)
 
     | otherwise = do
-        let text =
-                [ "This is the not-found message.\n\n"
-                , "  Method          : " , requestMethod req , "\n"
-                , "  HTTP Version    : " , fromString (show (httpVersion req)) , "\n"
-                , "  Path Info       : " , rawPathInfo req , "\n"
-                , "  Query String    : " , rawQueryString req , "\n"
-                , "  Server          : " , HPR.waiRequestHost req , "\n"
-                , "  Secure (SSL)    : " , fromString (show (isSecure req)), "\n"
-                , "  Request Headers :\n"
-                , headerShow (sort $ requestHeaders req)
-                , "\n"
-                ]
+        let text = "This is the not-found message.\n\n" : responseBody req
             respHeaders = [ (hContentType, "text/plain") ]
         respond . responseLBS status404 respHeaders $ LBS.fromChunks text
+
+
+responseBody :: Request -> [ByteString]
+responseBody req =
+    [ "  Method          : " , requestMethod req , "\n"
+    , "  HTTP Version    : " , fromString (show (httpVersion req)) , "\n"
+    , "  Path Info       : " , rawPathInfo req , "\n"
+    , "  Query String    : " , rawQueryString req , "\n"
+    , "  Server          : " , HPR.waiRequestHost req , "\n"
+    , "  Secure (SSL)    : " , fromString (show (isSecure req)), "\n"
+    , "  Request Headers :\n"
+    , headerShow (sort $ requestHeaders req)
+    , "\n"
+    ]
+
 
 
 simpleResponse :: Status -> ByteString -> Response
