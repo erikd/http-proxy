@@ -40,7 +40,7 @@ module Network.HTTP.Proxy
 import Blaze.ByteString.Builder (fromByteString)
 import Control.Applicative
 import Control.Concurrent.Async (race_)
-import Control.Exception (SomeException)
+import Control.Exception -- (SomeException, catch, toException)
 import Data.ByteString.Char8 (ByteString)
 import Data.Conduit (Flush (..), Sink, Source, ($$), mapOutput, yield)
 import Data.Conduit.Network
@@ -157,16 +157,20 @@ proxyApp settings mgr wreq respond
                 , HC.decompress = const True
                 , HC.checkStatus = \_ _ _ -> Nothing
                 }
-        HC.withResponse hreq mgr $ \res -> do
-            let body = mapOutput (Chunk . fromByteString) $ HCC.bodyReaderSource $ HC.responseBody res
-                headers = (CI.mk "X-Via-Proxy", "yes") : filter dropResponseHeader (HC.responseHeaders res)
-            respond $ responseSource (HC.responseStatus res) headers body
+        handle (respond . errorResponse) $
+            HC.withResponse hreq mgr $ \res -> do
+                let body = mapOutput (Chunk . fromByteString) . HCC.bodyReaderSource $ HC.responseBody res
+                    headers = (CI.mk "X-Via-Proxy", "yes") : filter dropResponseHeader (HC.responseHeaders res)
+                respond $ responseSource (HC.responseStatus res) headers body
       where
         dropRequestHeader (k, _) = k `notElem`
             [ "content-encoding"
             , "content-length"
             ]
         dropResponseHeader (k, _) = k `notElem` []
+
+        errorResponse :: SomeException -> Wai.Response
+        errorResponse = proxyOnException settings . toException
 
 
 handleConnect :: Wai.Request -> Source IO BS.ByteString -> Sink BS.ByteString IO () -> IO ()
