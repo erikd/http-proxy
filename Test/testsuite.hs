@@ -27,6 +27,7 @@ import Test.Gen
 import Test.QuickCheck
 import Test.TestServer
 import Test.Util
+import Test.Wai
 import Test.Request
 import Test.ServerDef
 
@@ -130,8 +131,8 @@ streamingTest dbg = withProxy defaultProxySettings $
 -- anything.
 requestTest :: Spec
 requestTest = describe "Request:" $ do
-    prop "Roundtrips with waiRequest." $ forAll genRequest $ \req ->
-        req `shouldBe` (proxyRequest . waiRequest) req
+    prop "Roundtrips with waiRequest." $ forAll genWaiRequest $ \wreq ->
+        wreq `waiShouldBe` (waiRequest wreq . proxyRequest) wreq
     it "Can add a request header." $
         proxyExpect proxySettingsAddHeader $ do
             req <- addTestProxy <$> mkGetRequest Http "/whatever"

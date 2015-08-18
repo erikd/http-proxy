@@ -75,6 +75,7 @@ Test-Suite testsuite
                    , random                  >= 1.1
                    , resourcet
                    , text
+                   , vault
                    , wai
                    , wai-conduit
                    , warp

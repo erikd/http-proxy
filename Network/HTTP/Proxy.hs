@@ -142,7 +142,7 @@ proxyApp settings mgr wreq respond
             respond $ responseRawSource (handleConnect wreq)
                     (Wai.responseLBS HT.status500 [("Content-Type", "text/plain")] "No support for responseRaw")
     | otherwise = do
-        wreq' <- waiRequest <$> proxyRequestModifier settings (proxyRequest wreq)
+        wreq' <- waiRequest wreq <$> proxyRequestModifier settings (proxyRequest wreq)
         hreq0 <- HC.parseUrl $ BS.unpack (Wai.rawPathInfo wreq' <> Wai.rawQueryString wreq')
         let hreq = hreq0
                 { HC.method = Wai.requestMethod wreq'

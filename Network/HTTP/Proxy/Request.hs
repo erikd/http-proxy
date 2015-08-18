@@ -48,8 +48,8 @@ proxyRequest wreq = Request
                         (Wai.rawPathInfo wreq)
                         (Wai.rawQueryString wreq)
 
-waiRequest :: Request -> Wai.Request
-waiRequest req = Wai.defaultRequest
+waiRequest :: Wai.Request -> Request -> Wai.Request
+waiRequest original req = original
     { Wai.requestMethod  = requestMethod req
     , Wai.httpVersion    = httpVersion req
     , Wai.requestHeaders = requestHeaders req
