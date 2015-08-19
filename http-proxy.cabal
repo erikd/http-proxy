@@ -81,6 +81,13 @@ Test-Suite testsuite
                    , warp
                    , warp-tls
 
+  Other-modules:     Test.Gen
+                   , Test.Request
+                   , Test.ServerDef
+                   , Test.TestServer
+                   , Test.Util
+                   , Test.Wai
+
   ghc-options:       -Wall -fwarn-tabs
   if os(windows)
       Cpp-options: -DWINDOWS
