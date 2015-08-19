@@ -12,8 +12,11 @@ clean :
 	find Network Test example -name \*.hi -exec rm -f {} \;
 	rm -rf $(TARGETS)
 
-check : testsuite
-	./testsuite
+check : dist/build/testsuite/testsuite
+	dist/build/testsuite/testsuite
+
+hlint :
+	hlint Network Test
 
 init : cabal.sandbox.config
 
@@ -23,7 +26,8 @@ cabal.sandbox.config :
 
 #-------------------------------------------------------------------------------
 
-testsuite : $(HSRC)
+dist/build/testsuite/testsuite : $(HSRC)
+	mkdir -p dist/build/testsuite
 	$(GHC) $(GHCFLAGS) -with-rtsopts="-M64m" -Wall -O2 -threaded Test/testsuite.hs -o $@
 
 simple-proxy : example/simple-proxy.hs $(HSRC)
