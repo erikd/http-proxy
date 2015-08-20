@@ -130,7 +130,7 @@ testSingleUrl debug testProxyPort request = do
 
 
 addTestProxy :: Int -> HC.Request -> HC.Request
-addTestProxy port = HC.addProxy "localhost" port
+addTestProxy = HC.addProxy "localhost"
 
 
 -- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
