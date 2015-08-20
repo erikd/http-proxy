@@ -54,7 +54,8 @@ runProxyTests dbg = hspec $ do
 -- -----------------------------------------------------------------------------
 
 testHelpersTest :: Spec
-testHelpersTest = withProxy defaultProxySettings $
+testHelpersTest =
+    -- Test the HTTP and HTTPS servers directly (ie bypassing the Proxy).
     describe "Test helper functionality:" $ do
         it "Byte Sink catches short response bodies." $
             runResourceT (byteSource 80 $$ byteSink 100)
@@ -80,34 +81,34 @@ testHelpersTest = withProxy defaultProxySettings $
 
 
 proxyTest :: UriScheme -> Bool -> Spec
-proxyTest uris dbg = withProxy defaultProxySettings $
+proxyTest uris dbg = around withDefaultTestProxy $
     describe ("Simple " ++ show uris ++ " proxying:") $ do
         let tname = show uris
-        it (tname ++ " GET.") $
-            testSingleUrl dbg =<< mkGetRequest uris "/"
-        it (tname ++ " GET with query.") $
-            testSingleUrl dbg =<< mkGetRequest uris "/a?b=1&c=2"
-        it (tname ++ " GET with request body.") $
-            testSingleUrl dbg =<< mkGetRequestWithBody uris "/" "Hello server!"
-        it (tname ++ " GET /forbidden returns 403.") $
-            testSingleUrl dbg =<< mkGetRequest uris "/forbidden"
-        it (tname ++ " GET /not-found returns 404.") $
-            testSingleUrl dbg =<< mkGetRequest uris "/not-found"
-        it (tname ++ " POST.") $
-            testSingleUrl dbg =<< mkPostRequest uris "/"
-        it (tname ++ " POST with request body.") $
-            testSingleUrl dbg =<< mkPostRequestBS uris "/" "Hello server!"
-        it (tname ++ " POST /forbidden returns 403.") $
-            testSingleUrl dbg =<< mkPostRequest uris "/forbidden"
-        it (tname ++ " POST /not-found returns 404.") $
-            testSingleUrl dbg =<< mkPostRequest uris "/not-found"
+        it (tname ++ " GET.") $ \ testProxyPort ->
+            testSingleUrl dbg testProxyPort =<< mkGetRequest uris "/"
+        it (tname ++ " GET with query.") $ \ testProxyPort ->
+            testSingleUrl dbg testProxyPort =<< mkGetRequest uris "/a?b=1&c=2"
+        it (tname ++ " GET with request body.") $ \ testProxyPort ->
+            testSingleUrl dbg testProxyPort =<< mkGetRequestWithBody uris "/" "Hello server!"
+        it (tname ++ " GET /forbidden returns 403.") $ \ testProxyPort ->
+            testSingleUrl dbg testProxyPort =<< mkGetRequest uris "/forbidden"
+        it (tname ++ " GET /not-found returns 404.") $ \ testProxyPort ->
+            testSingleUrl dbg testProxyPort =<< mkGetRequest uris "/not-found"
+        it (tname ++ " POST.") $ \ testProxyPort ->
+            testSingleUrl dbg testProxyPort =<< mkPostRequest uris "/"
+        it (tname ++ " POST with request body.") $ \ testProxyPort ->
+            testSingleUrl dbg testProxyPort =<< mkPostRequestBS uris "/" "Hello server!"
+        it (tname ++ " POST /forbidden returns 403.") $ \ testProxyPort ->
+            testSingleUrl dbg testProxyPort =<< mkPostRequest uris "/forbidden"
+        it (tname ++ " POST /not-found returns 404.") $ \ testProxyPort ->
+            testSingleUrl dbg testProxyPort =<< mkPostRequest uris "/not-found"
 
 
 protocolTest :: Spec
-protocolTest = withProxy defaultProxySettings $
+protocolTest = around withDefaultTestProxy $
     describe "HTTP protocol:" $
-        it "Passes re-directs through to client." $ do
-            req <- mkGetRequest Http "/301"
+        it "Passes re-directs through to client." $ \ testProxyPort -> do
+            req <- addTestProxy testProxyPort <$> mkGetRequest Http "/301"
             result <- httpRun req
             resultStatus result `shouldBe` 301
             lookup HT.hLocation (resultHeaders result) `shouldBe` Just "http://other-server/301"
@@ -116,15 +117,15 @@ protocolTest = withProxy defaultProxySettings $
 -- Only need to do this test for HTTP not HTTPS (because it just streams bytes
 -- back and forth).
 streamingTest :: Bool -> Spec
-streamingTest dbg = withProxy defaultProxySettings $
+streamingTest dbg = around withDefaultTestProxy $
     describe "HTTP streaming via proxy:" $ do
         forM_ [ 100, oneThousand, oneMillion, oneBillion ] $ \ size ->
-            it ("Http GET " ++ show (size :: Int64) ++ " bytes.") $
-                testSingleUrl dbg =<< mkGetRequest Http ("/large-get?" ++ show size)
+            it ("Http GET " ++ show (size :: Int64) ++ " bytes.") $ \ testProxyPort ->
+                testSingleUrl dbg testProxyPort =<< mkGetRequest Http ("/large-get?" ++ show size)
         forM_ [ 100, oneThousand, oneMillion, oneBillion ] $ \ size ->
-            it ("Http POST " ++ show (size :: Int64) ++ " bytes.") $ do
+            it ("Http POST " ++ show (size :: Int64) ++ " bytes.") $ \ testProxyPort -> do
                 let body = HC.requestBodySourceIO size $ byteSource size
-                testSingleUrl dbg =<< mkPostRequestBody Http ("/large-post?" ++ show size) body
+                testSingleUrl dbg testProxyPort =<< mkPostRequestBody Http ("/large-post?" ++ show size) body
 
 
 -- Test that a Request can be pulled apart and reconstructed without losing
@@ -134,13 +135,13 @@ requestTest = describe "Request:" $ do
     prop "Roundtrips with waiRequest." $ forAll genWaiRequest $ \wreq ->
         wreq `waiShouldBe` (waiRequest wreq . proxyRequest) wreq
     it "Can add a request header." $
-        proxyExpect proxySettingsAddHeader $ do
-            req <- addTestProxy <$> mkGetRequest Http "/whatever"
+        withTestProxy proxySettingsAddHeader $ \ testProxyPort -> do
+            req <- addTestProxy testProxyPort <$> mkGetRequest Http "/whatever"
             result <- httpRun req
             "X-Test-Header: Blah" `BS.isInfixOf` resultBS result `shouldBe` True
     it "Can rewrite HTTP to HTTPS." $
-        proxyExpect proxySettingsHttpsUpgrade $ do
-            req <- addTestProxy <$> mkGetRequest Http "/secure"
+        withTestProxy proxySettingsHttpsUpgrade $ \ testProxyPort -> do
+            req <- addTestProxy testProxyPort <$> mkGetRequest Http "/secure"
             result <- httpRun req
             -- Getting a TlsException shows that we have successfully upgraded
             -- from HTTP to HTTPS. Its not possible to ignore this failure
@@ -155,30 +156,27 @@ oneMillion = oneThousand * oneThousand
 oneBillion = oneThousand * oneMillion
 
 
-withProxy :: Settings -> SpecWith a -> SpecWith a
-withProxy = around_ . proxyExpect
+withDefaultTestProxy :: (Int -> IO ()) -> IO ()
+withDefaultTestProxy action = do
+    (sock, portnum) <- openLocalhostListenSocket
+    bracket (async $ runProxySettingsSocket defaultSettings sock) cancel (const $ action portnum)
 
 
-proxyExpect :: Settings -> Expectation -> Expectation
-proxyExpect settings = bracket (async $ runProxySettings settings) cancel . const
-
-
-defaultProxySettings :: Settings
-defaultProxySettings = defaultSettings
-                    { proxyHost = "*6"
-                    , proxyPort = proxyTestPort portsDef
-                    }
+withTestProxy :: Settings -> (Int -> Expectation) -> Expectation
+withTestProxy settings expectation = do
+    (sock, portnum) <- openLocalhostListenSocket
+    bracket (async $ runProxySettingsSocket settings sock) cancel (const $ expectation portnum)
 
 
 proxySettingsAddHeader :: Settings
-proxySettingsAddHeader = defaultProxySettings
+proxySettingsAddHeader = defaultSettings
     { proxyRequestModifier = \ req -> return $ req
                 { requestHeaders = (CI.mk "X-Test-Header", "Blah") : requestHeaders req
                 }
     }
 
 proxySettingsHttpsUpgrade :: Settings
-proxySettingsHttpsUpgrade = defaultProxySettings
+proxySettingsHttpsUpgrade = defaultSettings
     { proxyRequestModifier = \ req -> return $ req { requestPath = httpsUpgrade $ requestPath req }
     }
   where

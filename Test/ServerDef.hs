@@ -15,7 +15,6 @@ import System.Random
 data PortsDef = PortsDef
     { httpTestPort :: Int
     , httpsTestPort :: Int
-    , proxyTestPort :: Int
     }
     deriving Show
 
@@ -33,12 +32,12 @@ getPortsDef :: IO PortsDef
 getPortsDef = do
     vals <- randomRL []
     case sort vals of
-        [a, b, c] -> return $ PortsDef a b c
+        [a, b] -> return $ PortsDef a b
         _ -> getPortsDef
   where
     randomRL :: [Int] -> IO [Int]
     randomRL xs
-        | length xs == 3 = return $ sort xs
+        | length xs == 2 = return $ sort xs
         | otherwise = do
             x <- randomRIO portRange
             if x `elem` xs

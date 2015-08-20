@@ -16,6 +16,7 @@ import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import Data.Maybe
 import Data.String (fromString)
+import Network.Socket
 import Network.Connection
 
 import qualified Data.ByteString.Char8 as BS
@@ -28,8 +29,6 @@ import qualified Network.HTTP.Types as HT
 import qualified Network.Wai as Wai
 
 import Network.HTTP.Proxy.Request
-
-import Test.ServerDef
 
 
 dumpWaiRequest :: Wai.Request -> IO ()
@@ -120,18 +119,18 @@ compareResult (Result secure sa ha ba) (Result _ sb hb bb) = do
     assertMaybe (Just a) (Just b) fmsg = unless (a == b) . error $ fmsg a b
 
 
-testSingleUrl :: Bool -> HC.Request -> IO ()
-testSingleUrl debug request = do
+testSingleUrl :: Bool -> Int -> HC.Request -> IO ()
+testSingleUrl debug testProxyPort request = do
     direct <- httpRun request
-    proxy <- httpRun $ addTestProxy request
+    proxy <- httpRun $ addTestProxy testProxyPort request
     when debug $ do
         printResult direct
         printResult proxy
     compareResult direct proxy
 
 
-addTestProxy :: HC.Request -> HC.Request
-addTestProxy = HC.addProxy "localhost" (proxyTestPort portsDef)
+addTestProxy :: Int -> HC.Request -> HC.Request
+addTestProxy port = HC.addProxy "localhost" port
 
 
 -- | Use HC.http to fullfil a HC.Request. We need to wrap it because the
@@ -162,13 +161,13 @@ byteSink :: Monad m => Int64 -> DC.Sink ByteString m (Maybe ByteString)
 byteSink bytes = sink 0
   where
     sink :: Monad m => Int64 -> DC.Sink ByteString m (Maybe ByteString)
-    sink !count = DC.await >>= maybe (close count) (sinkBlock count)
+    sink !count = DC.await >>= maybe (closeSink count) (sinkBlock count)
 
     sinkBlock :: Monad m => Int64 -> ByteString -> DC.Sink ByteString m (Maybe ByteString)
     sinkBlock !count bs = sink (count + fromIntegral (BS.length bs))
 
-    close :: Monad m => Int64 -> m (Maybe ByteString)
-    close !count = return $
+    closeSink :: Monad m => Int64 -> m (Maybe ByteString)
+    closeSink !count = return $
             if count == bytes
                 then Nothing
                 else Just . BS.pack $ "Error : Body length " ++ show count
@@ -205,3 +204,13 @@ readInt64 = read . BS.unpack
 catchAny :: IO a -> (SomeException -> IO a) -> IO a
 catchAny action onE =
     withAsync action waitCatch >>= either onE return
+
+
+openLocalhostListenSocket :: IO (Socket, Port)
+openLocalhostListenSocket = do
+    sock <- socket AF_INET Stream defaultProtocol
+    addr <- inet_addr "127.0.0.1"
+    bind sock (SockAddrInet aNY_PORT addr)
+    listen sock 10
+    port <- fromIntegral <$> socketPort sock
+    return (sock, port)
