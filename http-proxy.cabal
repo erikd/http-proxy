@@ -38,6 +38,7 @@ Library
                    , http-conduit            >= 2.1.7
                    , http-types              >= 0.8
                    , mtl                     >= 2.1
+                   , network                 >= 2.6
                    , resourcet               >= 1.1
                    , tls                     >= 1.2
                    , text                    >= 1.2
