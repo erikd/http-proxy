@@ -33,6 +33,7 @@ module Network.HTTP.Proxy
 
     , runProxy
     , runProxySettings
+    , runProxySettingsSocket
     , defaultSettings
     )
     where
@@ -45,6 +46,7 @@ import Data.ByteString.Char8 (ByteString)
 import Data.Conduit (Flush (..), Sink, Source, ($$), mapOutput, yield)
 import Data.Conduit.Network
 import Data.Monoid
+import Network.Socket
 import Network.Wai.Conduit hiding (Request)
 
 import qualified Data.ByteString.Char8 as BS
@@ -76,10 +78,20 @@ runProxy port = runProxySettings $ defaultSettings { proxyPort = port }
 
 -- | Run a HTTP and HTTPS proxy server with the specified settings.
 runProxySettings :: Settings -> IO ()
-runProxySettings set =
-    HC.newManager HC.tlsManagerSettings
-        >>= Warp.runSettings (warpSettings set) . proxyApp set
+runProxySettings set = do
+    mgr <- HC.newManager HC.tlsManagerSettings
+    Warp.runSettings (warpSettings set) $ proxyApp set mgr
 
+-- | Run a HTTP and HTTPS proxy server with the specified settings but provide
+-- it with a Socket to accept connections on. The Socket should have already
+-- have had `bind` and `listen` called on it so that the proxy can simple
+-- `accept` connections.
+runProxySettingsSocket :: Settings -> Socket -> IO ()
+runProxySettingsSocket set sock = do
+    port <- socketPort sock
+    mgr <- HC.newManager HC.tlsManagerSettings
+    Warp.runSettingsSocket (warpSettings set) sock
+            $ proxyApp set { proxyPort = fromIntegral port } mgr
 
 -- | Various proxy server settings. This is purposely kept as an abstract data
 -- type so that new settings can be added without breaking backwards
