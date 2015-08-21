@@ -165,7 +165,7 @@ oneBillion = oneThousand * oneMillion
 withDefaultTestProxy :: (Int -> IO ()) -> IO ()
 withDefaultTestProxy action = do
     (sock, portnum) <- openLocalhostListenSocket
-    bracket (async $ runProxySettingsSocket defaultSettings sock) cancel (const $ action portnum)
+    bracket (async $ runProxySettingsSocket defaultProxySettings sock) cancel (const $ action portnum)
 
 
 withTestProxy :: Settings -> (Int -> Expectation) -> Expectation
@@ -175,14 +175,14 @@ withTestProxy settings expectation = do
 
 
 proxySettingsAddHeader :: Settings
-proxySettingsAddHeader = defaultSettings
+proxySettingsAddHeader = defaultProxySettings
     { proxyRequestModifier = \ req -> return . Right $ req
                 { requestHeaders = (CI.mk "X-Test-Header", "Blah") : requestHeaders req
                 }
     }
 
 proxySettingsHttpsUpgrade :: Settings
-proxySettingsHttpsUpgrade = defaultSettings
+proxySettingsHttpsUpgrade = defaultProxySettings
     { proxyRequestModifier = \ req -> return . Right $ req { requestPath = httpsUpgrade $ requestPath req }
     }
   where
@@ -193,7 +193,7 @@ proxySettingsHttpsUpgrade = defaultSettings
     bsShow = BS.pack . show
 
 proxySettingsProxyResponse :: Settings
-proxySettingsProxyResponse = defaultSettings
+proxySettingsProxyResponse = defaultProxySettings
     { proxyRequestModifier = const . return $ Left proxyResponse
     }
   where

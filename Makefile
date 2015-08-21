@@ -1,4 +1,4 @@
-TARGETS = debug-proxy request-rewrite-proxy simple-proxy testsuite
+TARGETS = debug-proxy request-rewrite-proxy simple-proxy dist/build/testsuite/testsuite
 
 GHC = cabal exec -- ghc
 GHCFLAGS = -Wall -fwarn-tabs

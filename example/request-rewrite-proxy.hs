@@ -3,7 +3,7 @@
 import Network.HTTP.Proxy
 
 main :: IO ()
-main = runProxySettings $ defaultSettings
+main = runProxySettings $ defaultProxySettings
                 { proxyPort = 31081
                 , proxyRequestModifier = Just secureGoogle
                 }

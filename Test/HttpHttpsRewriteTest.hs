@@ -40,7 +40,7 @@ httpToHttpsRewriteTest = do
     killThread t1
     killThread t2
   where
-    proxySettings = defaultSettings
+    proxySettings = defaultProxySettings
                 { proxyPort = U.testProxyPort
                 , proxyHost = "*6"
                 , proxyRequestModifier = Just httpsRedirector

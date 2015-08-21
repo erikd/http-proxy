@@ -34,7 +34,7 @@ module Network.HTTP.Proxy
     , runProxy
     , runProxySettings
     , runProxySettingsSocket
-    , defaultSettings
+    , defaultProxySettings
     )
     where
 
@@ -71,9 +71,9 @@ httpProxyVersion = showVersion Paths_warp.version
 
 
 -- | Run a HTTP and HTTPS proxy server on the specified port. This calls
--- 'runProxySettings' with 'defaultSettings'.
+-- 'runProxySettings' with 'defaultProxySettings'.
 runProxy :: Port -> IO ()
-runProxy port = runProxySettings $ defaultSettings { proxyPort = port }
+runProxy port = runProxySettings $ defaultProxySettings { proxyPort = port }
 
 -- | Run a HTTP and HTTPS proxy server with the specified settings.
 runProxySettings :: Settings -> IO ()
@@ -94,10 +94,10 @@ runProxySettingsSocket set sock = do
 
 -- | Various proxy server settings. This is purposely kept as an abstract data
 -- type so that new settings can be added without breaking backwards
--- compatibility. In order to create a 'Settings' value, use 'defaultSettings'
+-- compatibility. In order to create a 'Settings' value, use 'defaultProxySettings'
 -- and record syntax to modify individual records. For example:
 --
--- > defaultSettings { proxyPort = 3128 }
+-- > defaultProxySettings { proxyPort = 3128 }
 data Settings = Settings
     { proxyPort :: Int -- ^ Port to listen on. Default value: 3100
     , proxyHost :: HostPreference -- ^ Default value: HostIPv4
@@ -128,8 +128,8 @@ warpSettings pset = Warp.setPort (proxyPort pset)
 
 -- | The default settings for the Proxy server. See the individual settings for
 -- the default value.
-defaultSettings :: Settings
-defaultSettings = Settings
+defaultProxySettings :: Settings
+defaultProxySettings = Settings
     { proxyPort = 3100
     , proxyHost = "*"
     , proxyOnException = defaultExceptionResponse
