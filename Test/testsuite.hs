@@ -147,7 +147,7 @@ requestTest = describe "Request:" $ do
             -- Getting a TlsException shows that we have successfully upgraded
             -- from HTTP to HTTPS. Its not possible to ignore this failure
             -- because its made by the http-conduit inside the proxy.
-            BS.takeWhile (/= ' ') (resultBS result) `shouldBe` "TlsException"
+            BS.take 12 (resultBS result) `shouldBe` "TlsException"
     it "Can provide a proxy Response." $
         withTestProxy proxySettingsProxyResponse $ \ testProxyPort -> do
             req <- addTestProxy testProxyPort <$> mkGetRequest Http "/whatever"
