@@ -43,7 +43,7 @@ Library
                    , tls                     >= 1.2
                    , text                    >= 1.2
                    , transformers            >= 0.3
-                   , wai                     >= 3.0
+                   , wai                     >= 3.2
                    , wai-conduit             >= 3.0
                    , warp                    >= 3.0
                    , warp-tls                >= 3.0

@@ -47,6 +47,8 @@ genWaiRequest = do
                 bodylen         -- requestBodyLength
                 (Just host)     -- requestHeaderHost
                 Nothing         -- requestHeaderRange
+                Nothing         -- requestHeaderReferer
+                Nothing         -- requestHeaderUserAgent
 
 
 genRequestBody :: Gen (Wai.RequestBodyLength, ByteString)
