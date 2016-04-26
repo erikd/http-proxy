@@ -164,7 +164,7 @@ httpRun req = do
     modifyRequest r = r { HC.redirectCount = 0  }
 
 
-checkBodySize :: Monad m => DC.ResumableSource m ByteString -> Maybe Int64 -> m ByteString
+checkBodySize :: (Monad f, Functor f) => DC.ResumableSource f ByteString -> Maybe Int64 -> f ByteString
 checkBodySize bodySrc Nothing = fmap (BS.concat . LBS.toChunks) $ bodySrc DC.$$+- CB.take 1000
 checkBodySize bodySrc (Just len) = do
     let blockSize = 1000
