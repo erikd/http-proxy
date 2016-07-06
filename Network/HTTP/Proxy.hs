@@ -159,7 +159,7 @@ doUpstreamRequest settings mgr respond mwreq
         respond $ responseRawSource (handleConnect mwreq)
                     (Wai.responseLBS HT.status500 [("Content-Type", "text/plain")] "No support for responseRaw")
     | otherwise = do
-        hreq0 <- HC.parseUrl $ BS.unpack (Wai.rawPathInfo mwreq <> Wai.rawQueryString mwreq)
+        hreq0 <- HC.parseRequest $ BS.unpack (Wai.rawPathInfo mwreq <> Wai.rawQueryString mwreq)
         let hreq = hreq0
                 { HC.method = Wai.requestMethod mwreq
                 , HC.requestHeaders = filter dropRequestHeader $ Wai.requestHeaders mwreq
