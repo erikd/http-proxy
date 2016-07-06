@@ -34,8 +34,8 @@ Library
                    , case-insensitive        >= 1.2
                    , conduit                 >= 1.2
                    , conduit-extra           >= 1.1
-                   , http-client             >= 0.4
-                   , http-conduit            >= 2.1.7
+                   , http-client             >= 0.4         && < 0.5
+                   , http-conduit            >= 2.1.7       && < 2.2
                    , http-types              >= 0.8
                    , mtl                     >= 2.1
                    , network                 >= 2.6
