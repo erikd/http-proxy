@@ -171,7 +171,6 @@ doUpstreamRequest settings mgr respond mwreq
                         Wai.KnownLength l ->
                             HC.requestBodySourceIO (fromIntegral l) (sourceRequestBody mwreq)
                 , HC.decompress = const True
-                , HC.checkStatus = \_ _ _ -> Nothing
                 }
         handle (respond . errorResponse) $
             HC.withResponse hreq mgr $ \res -> do
