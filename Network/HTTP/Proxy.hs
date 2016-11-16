@@ -31,6 +31,8 @@ module Network.HTTP.Proxy
     , Settings (..)
     , UpstreamProxy (..)
 
+    , httpProxyApp
+
     , runProxy
     , runProxySettings
     , runProxySettingsSocket
@@ -79,7 +81,7 @@ runProxy port = runProxySettings $ defaultProxySettings { proxyPort = port }
 runProxySettings :: Settings -> IO ()
 runProxySettings set = do
     mgr <- HC.newManager HC.tlsManagerSettings
-    Warp.runSettings (warpSettings set) $ proxyApp set mgr
+    Warp.runSettings (warpSettings set) $ httpProxyApp set mgr
 
 -- | Run a HTTP and HTTPS proxy server with the specified settings but provide
 -- it with a Socket to accept connections on. The Socket should have already
@@ -90,7 +92,7 @@ runProxySettingsSocket set sock = do
     port <- socketPort sock
     mgr <- HC.newManager HC.tlsManagerSettings
     Warp.runSettingsSocket (warpSettings set) sock
-            $ proxyApp set { proxyPort = fromIntegral port } mgr
+            $ httpProxyApp set { proxyPort = fromIntegral port } mgr
 
 -- | Various proxy server settings. This is purposely kept as an abstract data
 -- type so that new settings can be added without breaking backwards
@@ -146,9 +148,10 @@ defaultExceptionResponse e =
                 $ LBS.fromChunks [BS.pack $ show e]
 
 -- -----------------------------------------------------------------------------
+-- Application == Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 
-proxyApp :: Settings -> HC.Manager -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-proxyApp settings mgr wreq respond = do
+httpProxyApp :: Settings -> HC.Manager -> Application
+httpProxyApp settings mgr wreq respond = do
     mwreq <- proxyRequestModifier settings $ proxyRequest wreq
     either respond (doUpstreamRequest settings mgr respond . waiRequest wreq) mwreq
 
