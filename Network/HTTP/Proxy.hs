@@ -32,6 +32,7 @@ module Network.HTTP.Proxy
     , UpstreamProxy (..)
 
     , httpProxyApp
+    , warpSettings
 
     , runProxy
     , runProxySettings
