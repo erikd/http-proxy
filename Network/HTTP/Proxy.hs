@@ -174,7 +174,9 @@ doUpstreamRequest settings mgr respond mwreq
                             HC.requestBodySourceChunkedIO (sourceRequestBody mwreq)
                         Wai.KnownLength l ->
                             HC.requestBodySourceIO (fromIntegral l) (sourceRequestBody mwreq)
-                , HC.decompress = const True
+                -- Do not touch response body. Otherwise there may be discrepancy
+                -- between response headers and the response content.
+                , HC.decompress = const False
                 }
         handle (respond . errorResponse) $
             HC.withResponse hreq mgr $ \res -> do
