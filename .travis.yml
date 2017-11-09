@@ -3,21 +3,13 @@
 # See http://www.reddit.com/r/haskell/comments/1os3f6/how_to_use_travisci_with_multiple_ghc_versions/
 
 env:
- # - GHCVER=6.12.3
- # - GHCVER=7.0.1
- # - GHCVER=7.0.2
- # - GHCVER=7.0.3
- # - GHCVER=7.0.4
- # - GHCVER=7.2.1
- # - GHCVER=7.2.2
- # - GHCVER=7.4.1
- # - GHCVER=7.4.2
  # - GHCVER=7.6.1
  # - GHCVER=7.6.2
  - GHCVER=7.6.3
  - GHCVER=7.8.4
  - GHCVER=7.10.3
  - GHCVER=8.0.1
+ - GHCVER=8.2.1
 
 matrix:
   allow_failures:
