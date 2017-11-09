@@ -106,7 +106,7 @@ data Settings = Settings
     , proxyHost :: HostPreference -- ^ Default value: HostIPv4
     , proxyOnException :: SomeException -> Wai.Response -- ^ What to do with exceptions thrown by either the application or server. Default: ignore server-generated exceptions (see 'InvalidRequest') and print application-generated applications to stderr.
     , proxyTimeout :: Int -- ^ Timeout value in seconds. Default value: 30
-    , proxyRequestModifier :: Request -> IO (Either Response Request) -- ^ A function that allows the the request to be modified before being run. Default: 'return . Right'.
+    , proxyRequestModifier :: Request -> IO (Either Response Request) -- ^ A function that allows the request to be modified before being run. Default: 'return . Right'.
     , proxyLogger :: ByteString -> IO () -- ^ A function for logging proxy internal state. Default: 'return ()'.
     , proxyUpstream :: Maybe UpstreamProxy -- ^ Optional upstream proxy.
     }
