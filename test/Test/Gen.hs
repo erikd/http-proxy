@@ -9,7 +9,6 @@ module Test.Gen
     ( genWaiRequest
     ) where
 
-import Control.Applicative
 import Data.ByteString.Char8 (ByteString)
 import Data.CaseInsensitive (CI)
 import Data.List (intersperse)

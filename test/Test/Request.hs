@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 ------------------------------------------------------------
 -- Copyright (c)  Erik de Castro Lopo <erikd@mega-nerd.com>
 -- License : BSD3
@@ -13,7 +14,6 @@ module Test.Request
     , mkPostRequestBody
     ) where
 
-import Control.Applicative
 import Data.ByteString (ByteString)
 import Data.Char
 import Data.Maybe

@@ -5,7 +5,6 @@
 -- License : BSD3
 ------------------------------------------------------------
 
-import Control.Applicative
 import Control.Concurrent.Async
 import Control.Exception
 import Control.Monad
@@ -35,11 +34,8 @@ proxyTestDebug = False
 
 main :: IO ()
 main = do
-#if __GLASGOW_HASKELL__ > 706
-    -- Clear the `http_proxy` enviroment variable. We can't use `unsetEnv` if
-    -- we want to support ghc 7.6.
+    -- Clear the `http_proxy` enviroment variable.
     unsetEnv "http_proxy"
-#endif
     bracket
         (mapM async [ runTestServer, runTestServerTLS ])
         (mapM_ cancel)
