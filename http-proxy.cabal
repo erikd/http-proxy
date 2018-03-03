@@ -1,19 +1,19 @@
-Name:           http-proxy
-Version:        0.1.0.5
-License:        BSD3
-License-file:   LICENSE
-Author:         Michael Snoyman, Erik de Castro Lopo
-Maintainer:     erikd@mega-nerd.com
-Homepage:       https://github.com/erikd/http-proxy
-Bug-reports:    https://github.com/erikd/http-proxy/issues
-Category:       Web
-Build-Type:     Simple
-Cabal-Version:  >=1.8
-Stability:      Experimental
+name:           http-proxy
+version:        0.1.0.5
+license:        BSD3
+license-file:   LICENSE
+author:         Michael Snoyman, Erik de Castro Lopo
+maintainer:     erikd@mega-nerd.com
+homepage:       https://github.com/erikd/http-proxy
+bug-reports:    https://github.com/erikd/http-proxy/issues
+category:       Web
+build-type:     Simple
+cabal-version:  >= 1.10
+stability:      Experimental
 
-Synopsis:       A library for writing HTTP and HTTPS proxies
+synopsis:       A library for writing HTTP and HTTPS proxies
 
-Description:
+description:
   http-proxy is a library for writing HTTP and HTTPS proxies.
   .
   Use of the Conduit library provides file streaming via the proxy in both
@@ -25,73 +25,83 @@ Description:
   a functions for exception reporting and request re-writing.  Eventually, this
   capability will be expanded to allow optional logging, disk caching etc.
 
-Library
-  Build-Depends:     base                    >= 4           && < 5
-                   , async                   >= 2.0
-                   , blaze-builder           >= 0.4
-                   , bytestring              >= 0.10
-                   , bytestring-lexing       >= 0.4
-                   , case-insensitive        >= 1.2
-                   , conduit                 >= 1.2
-                   , conduit-extra           >= 1.1
-                   , http-client             >= 0.5         && < 0.6
-                   , http-conduit            >= 2.2         && < 2.3
-                   , http-types              >= 0.8
-                   , mtl                     >= 2.1
-                   , network                 >= 2.6
-                   , resourcet               >= 1.1
-                   , tls                     >= 1.2
-                   , text                    >= 1.2
-                   , transformers            >= 0.3
-                   , wai                     >= 3.2
-                   , wai-conduit             >= 3.0
-                   , warp                    >= 3.0
-                   , warp-tls                >= 3.0
-
-  Exposed-modules:   Network.HTTP.Proxy
-  Other-modules:     Network.HTTP.Proxy.Request
-
-  ghc-options:       -Wall -fwarn-tabs
+library
+  default-language:     Haskell2010
+  ghc-options:          -Wall -fwarn-tabs
   if os(windows)
-      Cpp-options: -DWINDOWS
+      cpp-options:      -DWINDOWS
 
-Test-Suite testsuite
-  Type: exitcode-stdio-1.0
-  Main-is: Test/testsuite.hs
-  build-depends:     base
-                   , async
-                   , blaze-builder
-                   , bytestring
-                   , bytestring-lexing
-                   , case-insensitive
-                   , conduit
-                   , connection              >= 0.2
-                   , conduit-extra
-                   , http-client
-                   , http-conduit
-                   , http-types
-                   , hspec                   >= 2.1
-                   , network
-                   , QuickCheck              >= 2.7
-                   , random                  >= 1.1
-                   , resourcet
-                   , text
-                   , vault
-                   , wai
-                   , wai-conduit
-                   , warp
-                   , warp-tls
+  exposed-modules:      Network.HTTP.Proxy
+                        Network.HTTP.Proxy.Request
 
-  Other-modules:     Test.Gen
-                   , Test.Request
-                   , Test.ServerDef
-                   , Test.TestServer
-                   , Test.Util
-                   , Test.Wai
+  build-depends:        base                    >= 4           && < 5
+                      , async                   >= 2.0
+                      , blaze-builder           >= 0.4
+                      , bytestring              >= 0.10
+                      , bytestring-lexing       >= 0.4
+                      , case-insensitive        >= 1.2
+                      , conduit                 >= 1.2
+                      , conduit-extra           >= 1.1         && < 1.3
+                      , http-client             >= 0.5         && < 0.6
+                      , http-conduit            >= 2.2         && < 2.3
+                      , http-types              >= 0.8
+                      , mtl                     >= 2.1
+                      , network                 >= 2.6
+                      , resourcet               >= 1.1
+                      -- Not used directly but necessary to enforce < 0.2
+                      , streaming-commons       >= 0.1         && < 0.2
+                      , tls                     >= 1.2
+                      , text                    >= 1.2
+                      , transformers            >= 0.3
+                      , wai                     >= 3.2
+                      , wai-conduit             >= 3.0
+                      , warp                    >= 3.0
+                      , warp-tls                >= 3.0
 
-  ghc-options:       -Wall -fwarn-tabs
+
+
+test-suite test-io
+  type:                 exitcode-stdio-1.0
+  ghc-options:          -Wall -fwarn-tabs -threaded
   if os(windows)
-      Cpp-options: -DWINDOWS
+      cpp-options:      -DWINDOWS
+  default-language:     Haskell2010
+  hs-source-dirs:       test
+  main-is:              test-io.hs
+
+  other-modules:        Test.Gen
+                      , Test.Request
+                      , Test.ServerDef
+                      , Test.TestServer
+                      , Test.Util
+                      , Test.Wai
+
+  build-depends:        base
+                      , async
+                      , blaze-builder
+                      , bytestring
+                      , bytestring-lexing
+                      , case-insensitive
+                      , conduit
+                      , connection              >= 0.2
+                      , conduit-extra
+                      , http-client
+                      , http-conduit
+                      , http-proxy
+                      , http-types
+                      , hspec                   >= 2.1
+                      , network
+                      , QuickCheck              >= 2.7
+                      , random                  >= 1.1
+                      , resourcet
+                      , text
+                      , vault
+                      , wai
+                      , wai-conduit
+                      , warp
+                      , warp-tls
+
+
 
 source-repository head
   type:     git
