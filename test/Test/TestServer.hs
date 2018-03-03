@@ -9,7 +9,6 @@ module Test.TestServer
     , runTestServerTLS
     ) where
 
-import Control.Applicative
 import Data.ByteString (ByteString)
 import Data.List (sort)
 import Data.Monoid

@@ -7,7 +7,6 @@
 module Test.Util where
 
 import Blaze.ByteString.Builder
-import Control.Applicative
 import Control.Concurrent.Async
 import Control.Exception hiding (assert)
 import Control.Monad (forM_, when, unless)
