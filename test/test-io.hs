@@ -15,7 +15,6 @@ import Data.Int (Int64)
 import Data.Monoid
 import System.Environment
 import Test.Hspec
-import Test.Hspec.QuickCheck
 
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.CaseInsensitive as CI
@@ -24,13 +23,9 @@ import qualified Network.HTTP.Types as HT
 import qualified Network.Wai as Wai
 
 import Network.HTTP.Proxy
-import Network.HTTP.Proxy.Request
 
-import Test.Gen
-import Test.QuickCheck
 import Test.TestServer
 import Test.Util
-import Test.Wai
 import Test.Request
 import Test.ServerDef
 
@@ -140,8 +135,6 @@ streamingTest dbg = around withDefaultTestProxy $
 -- anything.
 requestTest :: Spec
 requestTest = describe "Request:" $ do
-    prop "Roundtrips with waiRequest." $ forAll genWaiRequest $ \wreq ->
-        wreq `waiShouldBe` (waiRequest wreq . proxyRequest) wreq
     it "Can add a request header." $
         withTestProxy proxySettingsAddHeader $ \ testProxyPort -> do
             req <- addTestProxy testProxyPort <$> mkGetRequest Http "/whatever"

@@ -28,7 +28,8 @@ install:
 script:
  - cabal-1.24 configure --enable-tests
  - cabal-1.24 build
- - dist/build/testsuite/testsuite
+ - dist/build/test/test
+ - dist/build/test-io/test-io
  - cabal-1.24 haddock
  - cabal-1.24 sdist
 
