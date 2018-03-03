@@ -42,7 +42,7 @@ runTestServer =
 runTestServerTLS :: IO ()
 runTestServerTLS =
     let settings = setPort (httpsTestPort portsDef) $ setHost "*6" defaultSettings
-        tlsSettings' = tlsSettings "Test/certificate.pem" "Test/key.pem"
+        tlsSettings' = tlsSettings "test/certificate.pem" "test/key.pem"
     in catchAny (runTLS tlsSettings' settings serverApp) print
 
 --------------------------------------------------------------------------------

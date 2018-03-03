@@ -60,6 +60,47 @@ library
 
 
 
+test-suite test
+  type:                 exitcode-stdio-1.0
+  ghc-options:          -Wall -fwarn-tabs -threaded
+  if os(windows)
+      cpp-options:      -DWINDOWS
+  default-language:     Haskell2010
+  hs-source-dirs:       test
+  main-is:              test.hs
+
+  other-modules:        Test.Gen
+                      , Test.Request
+                      , Test.ServerDef
+                      , Test.TestServer
+                      , Test.Util
+                      , Test.Wai
+
+  build-depends:        base
+                      , async
+                      , blaze-builder
+                      , bytestring
+                      , bytestring-lexing
+                      , case-insensitive
+                      , conduit
+                      , connection              >= 0.2
+                      , conduit-extra
+                      , http-client
+                      , http-conduit
+                      , http-proxy
+                      , http-types
+                      , hspec                   >= 2.1
+                      , network
+                      , QuickCheck              >= 2.7
+                      , random                  >= 1.1
+                      , resourcet
+                      , text
+                      , vault
+                      , wai
+                      , wai-conduit
+                      , warp
+                      , warp-tls
+
 test-suite test-io
   type:                 exitcode-stdio-1.0
   ghc-options:          -Wall -fwarn-tabs -threaded
