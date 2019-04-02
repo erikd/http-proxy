@@ -224,8 +224,9 @@ catchAny action onE =
 openLocalhostListenSocket :: IO (Socket, Port)
 openLocalhostListenSocket = do
     sock <- socket AF_INET Stream defaultProtocol
-    addr <- inet_addr "127.0.0.1"
-    bind sock (SockAddrInet aNY_PORT addr)
+    addr:_ <- getAddrInfo Nothing (Just "127.0.0.1") Nothing
+    bind sock (addrAddress addr)
     listen sock 10
     port <- fromIntegral <$> socketPort sock
     return (sock, port)
+
