@@ -47,7 +47,7 @@ library
                       , http-conduit            >= 2.1.11      && < 2.2
                       , http-types              >= 0.8
                       , mtl                     >= 2.1
-                      , network                 >= 2.6
+                      , network                 == 2.7.*
                       , resourcet               >= 1.1
                       -- Not used directly but necessary to enforce < 0.2
                       , streaming-commons       >= 0.1         && < 0.2
