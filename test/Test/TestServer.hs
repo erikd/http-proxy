@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE CPP, OverloadedStrings #-}
 ------------------------------------------------------------
 -- Copyright : Erik de Castro Lopo <erikd@mega-nerd.com>
 -- License : BSD3
@@ -10,8 +10,11 @@ module Test.TestServer
     ) where
 
 import Data.ByteString (ByteString)
+import Data.Conduit (ConduitT)
 import Data.List (sort)
-import Data.Monoid
+#if ! MIN_VERSION_base(4,11,0)
+import Data.Monoid ((<>))
+#endif
 import Data.String
 import Network.HTTP.Types
 import Network.Wai
@@ -20,7 +23,7 @@ import Network.Wai.Handler.Warp
 import Network.Wai.Handler.WarpTLS
 
 import Data.ByteString.Lex.Integral (readDecimal_)
-import Data.Conduit (($$))
+import Data.Conduit ((.|))
 import Data.Int (Int64)
 
 import qualified Data.ByteString.Char8 as BS
@@ -97,9 +100,9 @@ responseBody req =
     ]
 
 
-largePostCheck :: Int64 -> DC.Source IO ByteString -> IO Response
+largePostCheck :: Int64 -> ConduitT () ByteString IO () -> IO Response
 largePostCheck len rbody =
-    maybe success failure <$> (rbody $$ byteSink len)
+    maybe success failure <$> (DC.runConduit $ rbody .| byteSink len)
   where
     success = simpleResponse status200 . BS.pack $ "Post-size: " ++ show len
     failure = simpleResponse status500

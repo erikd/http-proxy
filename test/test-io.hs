@@ -8,10 +8,11 @@
 import Control.Concurrent.Async
 import Control.Exception
 import Control.Monad
-import Control.Monad.Trans.Resource
 import Data.Conduit
 import Data.Int (Int64)
-import Data.Monoid
+#if ! MIN_VERSION_base(4,11,0)
+import Data.Monoid ((<>))
+#endif
 import System.Environment
 import Test.Hspec
 
@@ -57,12 +58,12 @@ testHelpersTest =
     -- Test the HTTP and HTTPS servers directly (ie bypassing the Proxy).
     describe "Test helper functionality:" $ do
         it "Byte Sink catches short response bodies." $
-            runResourceT (byteSource 80 $$ byteSink 100)
+            runConduit (byteSource 80 .| byteSink 100)
                 `shouldReturn` Just "Error : Body length 80 should have been 100."
         it "Byte Source and Sink work in constant memory." $
-            runResourceT (byteSource oneBillion $$ byteSink oneBillion) `shouldReturn` Nothing
+            runConduit (byteSource oneBillion .| byteSink oneBillion) `shouldReturn` Nothing
         it "Byte Sink catches long response bodies." $
-            runResourceT (byteSource 110 $$ byteSink 100)
+            runConduit (byteSource 110 .| byteSink 100)
                 `shouldReturn` Just "Error : Body length 110 should have been 100."
         it "Client and server can stream GET response." $ do
             let size = oneBillion
@@ -143,7 +144,7 @@ requestTest = describe "Request:" $ do
             -- Getting a TlsException shows that we have successfully upgraded
             -- from HTTP to HTTPS. Its not possible to ignore this failure
             -- because its made by the http-conduit inside the proxy.
-            BS.takeWhile (/= ' ') (resultBS result) `shouldBe` "TlsExceptionHostPort"
+            BS.takeWhile (/= ' ') (resultBS result) `shouldBe` "HttpExceptionRequest"
     it "Can provide a proxy Response." $
         withTestProxy proxySettingsProxyResponse $ \ testProxyPort -> do
             req <- addTestProxy testProxyPort <$> mkGetRequest Http "/whatever"

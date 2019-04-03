@@ -45,9 +45,12 @@ import Blaze.ByteString.Builder (fromByteString)
 import Control.Concurrent.Async (race_)
 import Control.Exception -- (SomeException, catch, toException)
 import Data.ByteString.Char8 (ByteString)
-import Data.Conduit (Flush (..), Sink, Source, ($$), mapOutput, yield)
+import Data.Conduit (ConduitT, Flush (..), (.|), mapOutput, runConduit, yield)
 import Data.Conduit.Network
-import Data.Monoid
+#if ! MIN_VERSION_base(4,11,0)
+import Data.Monoid ((<>))
+#endif
+import Data.Void (Void)
 import Network.Socket
 import Network.Wai.Conduit hiding (Request, requestMethod)
 
@@ -194,7 +197,13 @@ doUpstreamRequest settings mgr respond mwreq
         errorResponse = proxyOnException settings . toException
 
 
-handleConnect :: Wai.Request -> Source IO BS.ByteString -> Sink BS.ByteString IO () -> IO ()
+-- handleConnect :: Wai.Request -> ConduitT IO BS.ByteString -> ConduitT BS.ByteString IO () -> IO ()
+
+handleConnect :: Wai.Request
+                       -> ConduitT () ByteString IO ()
+                       -> ConduitT ByteString Void IO a
+                       -> IO ()
+
 handleConnect wreq fromClient toClient = do
     let (host, port) =
             case BS.break (== ':') $ Wai.rawPathInfo wreq of
@@ -205,7 +214,7 @@ handleConnect wreq fromClient toClient = do
                         Nothing -> (x, 80)
         settings = clientSettings port host
     runTCPClient settings $ \ad -> do
-        yield "HTTP/1.1 200 OK\r\n\r\n" $$ toClient
+        _ <- runConduit $ yield "HTTP/1.1 200 OK\r\n\r\n" .| toClient
         race_
-            (fromClient $$ NC.appSink ad)
-            (NC.appSource ad $$ toClient)
+            (runConduit $ fromClient .| NC.appSink ad)
+            (runConduit $ NC.appSource ad .| toClient)
