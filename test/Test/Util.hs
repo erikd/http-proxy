@@ -10,8 +10,9 @@ import Blaze.ByteString.Builder
 import Control.Concurrent.Async
 import Control.Exception hiding (assert)
 import Control.Monad (forM_, when, unless)
-import Control.Monad.Trans.Resource
+import Control.Monad.Trans.Resource (runResourceT)
 import Data.ByteString (ByteString)
+import Data.Conduit (ConduitT, Flush (..), SealedConduitT)
 import Data.Int (Int64)
 import Data.Maybe
 import Data.String (fromString)
@@ -156,14 +157,14 @@ httpRun req = do
     runResourceT $ do
         resp <- HC.http (modifyRequest req) mgr
         let contentLen = readInt64 <$> lookup HT.hContentLength (HC.responseHeaders resp)
-        bodyText <- checkBodySize (HC.responseBody resp) contentLen
+        bodyText <- checkBodySize (DC.sealConduitT $ HC.responseBody resp) contentLen
         return $ Result (HC.secure req) (HT.statusCode $ HC.responseStatus resp)
                         (HC.responseHeaders resp) bodyText
   where
     modifyRequest r = r { HC.redirectCount = 0  }
 
 
-checkBodySize :: (Monad f, Functor f) => DC.ResumableSource f ByteString -> Maybe Int64 -> f ByteString
+checkBodySize :: Monad f => SealedConduitT () ByteString f () -> Maybe Int64 -> f ByteString
 checkBodySize bodySrc Nothing = fmap (BS.concat . LBS.toChunks) $ bodySrc DC.$$+- CB.take 1000
 checkBodySize bodySrc (Just len) = do
     let blockSize = 1000
@@ -172,13 +173,13 @@ checkBodySize bodySrc (Just len) = do
         else fromMaybe "Success" <$> (bodySrc DC.$$+- byteSink len)
 
 
-byteSink :: Monad m => Int64 -> DC.Sink ByteString m (Maybe ByteString)
+byteSink :: Monad m => Int64 -> ConduitT ByteString a m (Maybe ByteString)
 byteSink bytes = sink 0
   where
-    sink :: Monad m => Int64 -> DC.Sink ByteString m (Maybe ByteString)
+    sink :: Monad m => Int64 -> ConduitT ByteString a m (Maybe ByteString)
     sink !count = DC.await >>= maybe (closeSink count) (sinkBlock count)
 
-    sinkBlock :: Monad m => Int64 -> ByteString -> DC.Sink ByteString m (Maybe ByteString)
+    sinkBlock :: Monad m => Int64 -> ByteString -> ConduitT ByteString a m (Maybe ByteString)
     sinkBlock !count bs = sink (count + fromIntegral (BS.length bs))
 
     closeSink :: Monad m => Int64 -> m (Maybe ByteString)
@@ -189,14 +190,14 @@ byteSink bytes = sink 0
                                     ++ " should have been " ++ show bytes ++ "."
 
 
-builderSource :: Monad m => Int64 -> DC.Source m (DC.Flush Builder)
-builderSource = DC.mapOutput (DC.Chunk . fromByteString) . byteSource
+builderSource :: Monad m => Int64 -> ConduitT () (Flush Builder) m ()
+builderSource = DC.mapOutput (Chunk . fromByteString) . byteSource
 
 
-byteSource :: Monad m => Int64 -> DC.Source m ByteString
+byteSource :: Monad m => Int64 -> ConduitT i ByteString m ()
 byteSource bytes = loop 0
   where
-    loop :: Monad m => Int64 -> DC.Source m ByteString
+    loop :: Monad m => Int64 -> ConduitT i ByteString m ()
     loop !count
         | count >= bytes = return ()
         | count + blockSize64 < bytes = do
@@ -205,7 +206,7 @@ byteSource bytes = loop 0
         | otherwise = do
             let n = fromIntegral $ bytes - count
             DC.yield $ BS.take n bsbytes
-            return ()
+            pure ()
 
     blockSize = 8192 :: Int
     blockSize64 = fromIntegral blockSize :: Int64
