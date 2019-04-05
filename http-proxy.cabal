@@ -13,6 +13,10 @@ stability:      Experimental
 
 synopsis:       A library for writing HTTP and HTTPS proxies
 
+source-repository head
+  type:     git
+  location: https://github.com/erikd/http-proxy.git
+
 description:
   http-proxy is a library for writing HTTP and HTTPS proxies.
   .
@@ -61,7 +65,7 @@ library
 
 test-suite test
   type:                 exitcode-stdio-1.0
-  ghc-options:          -Wall -fwarn-tabs -threaded
+  ghc-options:          -Wall -fwarn-tabs -threaded -rtsopts "-with-rtsopts=-H1m -K1m"
   if os(windows)
       cpp-options:      -DWINDOWS
   default-language:     Haskell2010
@@ -102,7 +106,7 @@ test-suite test
 
 test-suite test-io
   type:                 exitcode-stdio-1.0
-  ghc-options:          -Wall -fwarn-tabs -threaded
+  ghc-options:          -Wall -fwarn-tabs -threaded -rtsopts "-with-rtsopts=-H1m -K1m"
   if os(windows)
       cpp-options:      -DWINDOWS
   default-language:     Haskell2010
@@ -140,9 +144,3 @@ test-suite test-io
                       , wai-conduit
                       , warp
                       , warp-tls
-
-
-
-source-repository head
-  type:     git
-  location: https://github.com/erikd/http-proxy.git
