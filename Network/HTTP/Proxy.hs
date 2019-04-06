@@ -105,22 +105,36 @@ runProxySettingsSocket set sock = do
 --
 -- > defaultProxySettings { proxyPort = 3128 }
 data Settings = Settings
-    { proxyPort :: Int -- ^ Port to listen on. Default value: 3100
-    , proxyHost :: HostPreference -- ^ Default value: HostIPv4
-    , proxyOnException :: SomeException -> Wai.Response -- ^ What to do with exceptions thrown by either the application or server. Default: ignore server-generated exceptions (see 'InvalidRequest') and print application-generated applications to stderr.
-    , proxyTimeout :: Int -- ^ Timeout value in seconds. Default value: 30
-    , proxyRequestModifier :: Request -> IO (Either Response Request) -- ^ A function that allows the request to be modified before being run. Default: 'return . Right'.
-    , proxyLogger :: ByteString -> IO () -- ^ A function for logging proxy internal state. Default: 'return ()'.
-    , proxyUpstream :: Maybe UpstreamProxy -- ^ Optional upstream proxy.
+    { proxyPort :: Int
+      -- ^ Port to listen on. Default value: 3100
+    , proxyHost :: HostPreference
+    -- ^ Default value: HostIPv4
+    , proxyOnException :: SomeException -> Wai.Response
+    -- ^ What to do with exceptions thrown by either the application or server.
+    -- Default: ignore server-generated exceptions (see 'InvalidRequest') and print
+    -- application-generated applications to stderr.
+    , proxyTimeout :: Int
+    -- ^ Timeout value in seconds. Default value: 30
+    , proxyRequestModifier :: Request -> IO (Either Response Request)
+    -- ^ A function that allows the request to be modified before being run. Default: 'return . Right'.
+    -- This only works for unencrypted HTTP requests (eg to upgrade the request to HTTPS) because
+    -- HTTPS requests are encrypted.
+    , proxyLogger :: ByteString -> IO ()
+    -- ^ A function for logging proxy internal state. Default: 'return ()'.
+    , proxyUpstream :: Maybe UpstreamProxy
+    -- ^ Optional upstream proxy.
     }
 
 -- | A http-proxy can be configured to use and upstream proxy by providing the
 -- proxy name, the port it listens to and an option username and password for
 -- proxy authorisation.
 data UpstreamProxy = UpstreamProxy
-    { upstreamHost :: ByteString -- ^ The upstream proxy's hostname.
-    , upstreamPort :: Int -- ^ The upstream proxy's port number.
-    , upstreamAuth :: Maybe (ByteString, ByteString) -- ^ Optional username and password to use with upstream proxy.
+    { upstreamHost :: ByteString
+    -- ^ The upstream proxy's hostname.
+    , upstreamPort :: Int
+    -- ^ The upstream proxy's port number.
+    , upstreamAuth :: Maybe (ByteString, ByteString)
+    -- ^ Optional username and password to use with upstream proxy.
     }
 
 
@@ -147,9 +161,9 @@ defaultProxySettings = Settings
 
 defaultExceptionResponse :: SomeException -> Wai.Response
 defaultExceptionResponse e =
-        Wai.responseLBS HT.internalServerError500
-                [ (HT.hContentType, "text/plain; charset=utf-8") ]
-                $ LBS.fromChunks [BS.pack $ show e]
+    Wai.responseLBS HT.internalServerError500
+        [ (HT.hContentType, "text/plain; charset=utf-8") ]
+        $ LBS.fromChunks [BS.pack $ show e]
 
 -- -----------------------------------------------------------------------------
 -- Application == Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
@@ -197,13 +211,7 @@ doUpstreamRequest settings mgr respond mwreq
         errorResponse = proxyOnException settings . toException
 
 
--- handleConnect :: Wai.Request -> ConduitT IO BS.ByteString -> ConduitT BS.ByteString IO () -> IO ()
-
-handleConnect :: Wai.Request
-                       -> ConduitT () ByteString IO ()
-                       -> ConduitT ByteString Void IO a
-                       -> IO ()
-
+handleConnect :: Wai.Request -> ConduitT () ByteString IO () -> ConduitT ByteString Void IO a -> IO ()
 handleConnect wreq fromClient toClient = do
     let (host, port) =
             case BS.break (== ':') $ Wai.rawPathInfo wreq of

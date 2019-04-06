@@ -15,7 +15,7 @@ module Network.HTTP.Proxy.Request
     where
 
 import Data.ByteString.Char8 (ByteString)
-import Data.Maybe
+import Data.Maybe (fromMaybe)
 import Network.HTTP.Types (Method)
 
 import qualified Network.HTTP.Types as HT
