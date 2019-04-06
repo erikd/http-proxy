@@ -1,5 +1,5 @@
 
-import Network.HTTP.Proxy
+import Network.HTTP.Proxy (runProxy)
 
 -- The simplest possible HTTP/HTTPS proxy.
 main :: IO ()
