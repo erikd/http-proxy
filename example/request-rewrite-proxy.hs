@@ -1,22 +1,27 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-import Network.HTTP.Proxy
+import Network.HTTP.Proxy (ProxySettings (..), Request (..))
+import qualified Network.HTTP.Proxy as Proxy
 
 main :: IO ()
-main = runProxySettings $ defaultProxySettings
-                { proxyPort = 31081
-                , proxyRequestModifier = Just secureGoogle
-                }
+main =
+  Proxy.runProxySettings $
+    Proxy.defaultProxySettings
+      { proxyPort = 31081
+      , proxyHttpRequestModifier = Just secureGoogle
+      }
 
--- We can modify the request so that instead of going to unsecured Google
--- search page, people get redirected to the encrypted version.
+-- Modifying the request like this is only possible for unencrypted HTTP connections
+-- by my be useful for eg redirecting HTTP to HTTPS.
+-- HTTPS cnnections cannot be modified like this because the for HTTPS connections
+-- even the request itself is encrypted.
 
 secureGoogle :: Request -> IO Request
 secureGoogle req
-    | requestHost req == "www.google.com" =
-        return $ req
-                { requestHost = "encrypted.google.com"
-                , requestPort = 443
+  | "www.google.com" `BS.isInfixOf` requestPath req
+      && not ("https" `BS.isprefixOf` requestPath req =
+        pure $ req
+                { requestPath = "encrypted.google.com"
                 }
 
-    | otherwise = return req
+  | otherwise = pure req

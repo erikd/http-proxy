@@ -173,14 +173,14 @@ withTestProxy settings expectation = do
 
 proxySettingsAddHeader :: Settings
 proxySettingsAddHeader = defaultProxySettings
-    { proxyRequestModifier = \ req -> return . Right $ req
+    { proxyHttpRequestModifier = \ req -> return . Right $ req
                 { requestHeaders = (CI.mk "X-Test-Header", "Blah") : requestHeaders req
                 }
     }
 
 proxySettingsHttpsUpgrade :: Settings
 proxySettingsHttpsUpgrade = defaultProxySettings
-    { proxyRequestModifier = \ req -> return . Right $ req { requestPath = httpsUpgrade $ requestPath req }
+    { proxyHttpRequestModifier = \ req -> return . Right $ req { requestPath = httpsUpgrade $ requestPath req }
     }
   where
     httpsUpgrade bs =
@@ -191,7 +191,7 @@ proxySettingsHttpsUpgrade = defaultProxySettings
 
 proxySettingsProxyResponse :: Settings
 proxySettingsProxyResponse = defaultProxySettings
-    { proxyRequestModifier = const . return $ Left proxyResponse
+    { proxyHttpRequestModifier = const . return $ Left proxyResponse
     }
   where
     proxyResponse :: Wai.Response

@@ -115,7 +115,7 @@ data Settings = Settings
     -- application-generated applications to stderr.
     , proxyTimeout :: Int
     -- ^ Timeout value in seconds. Default value: 30
-    , proxyRequestModifier :: Request -> IO (Either Response Request)
+    , proxyHttpRequestModifier :: Request -> IO (Either Response Request)
     -- ^ A function that allows the request to be modified before being run. Default: 'return . Right'.
     -- This only works for unencrypted HTTP requests (eg to upgrade the request to HTTPS) because
     -- HTTPS requests are encrypted.
@@ -154,7 +154,7 @@ defaultProxySettings = Settings
     , proxyHost = "*"
     , proxyOnException = defaultExceptionResponse
     , proxyTimeout = 30
-    , proxyRequestModifier = return . Right
+    , proxyHttpRequestModifier = return . Right
     , proxyLogger = const $ return ()
     , proxyUpstream = Nothing
     }
@@ -170,7 +170,7 @@ defaultExceptionResponse e =
 
 httpProxyApp :: Settings -> HC.Manager -> Application
 httpProxyApp settings mgr wreq respond = do
-    mwreq <- proxyRequestModifier settings $ proxyRequest wreq
+    mwreq <- proxyHttpRequestModifier settings $ proxyRequest wreq
     either respond (doUpstreamRequest settings mgr respond . waiRequest wreq) mwreq
 
 
