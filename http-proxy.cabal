@@ -154,3 +154,15 @@ executable simple-proxy
 
   build-depends:        base
                       , http-proxy
+
+executable request-rewrite-proxy
+  default-language:     Haskell2010
+  ghc-options:          -Wall -fwarn-tabs -threaded -rtsopts "-with-rtsopts=-H1m -K1m"
+  hs-source-dirs:       example
+  main-is:              request-rewrite-proxy.hs
+
+  build-depends:        base
+                      , bytestring
+                      , http-proxy
+                      , network-uri
+                      , wai
