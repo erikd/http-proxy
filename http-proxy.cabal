@@ -146,19 +146,10 @@ test-suite test-io
                       , warp
                       , warp-tls
 
-executable simple-proxy
-  default-language:     Haskell2010
-  ghc-options:          -Wall -fwarn-tabs -threaded -rtsopts "-with-rtsopts=-H1m -K1m"
-  hs-source-dirs:       example
-  main-is:              simple-proxy.hs
-
-  build-depends:        base
-                      , http-proxy
-
 executable request-rewrite-proxy
   default-language:     Haskell2010
   ghc-options:          -Wall -fwarn-tabs -threaded -rtsopts "-with-rtsopts=-H1m -K1m"
-  hs-source-dirs:       example
+  hs-source-dirs:       examples
   main-is:              request-rewrite-proxy.hs
 
   build-depends:        base
@@ -166,3 +157,12 @@ executable request-rewrite-proxy
                       , http-proxy
                       , network-uri
                       , wai
+
+executable simple-proxy
+  default-language:     Haskell2010
+  ghc-options:          -Wall -fwarn-tabs -threaded -rtsopts "-with-rtsopts=-H1m -K1m"
+  hs-source-dirs:       examples
+  main-is:              simple-proxy.hs
+
+  build-depends:        base
+                      , http-proxy
