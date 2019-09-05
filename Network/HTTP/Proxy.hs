@@ -38,6 +38,7 @@ module Network.HTTP.Proxy
     , runProxySettings
     , runProxySettingsSocket
     , defaultProxySettings
+    , retryWithRequest
     )
     where
 
@@ -170,17 +171,28 @@ defaultExceptionResponse e =
         [ (HT.hContentType, "text/plain; charset=utf-8") ]
         $ LBS.fromChunks [BS.pack $ show e]
 
+data RetryException = RetryException Request
+                    deriving Show
+
+instance Exception RetryException
+
+-- | For use in 'proxyHttpResponseModifier'. Ignore the current response and perform a new request.
+retryWithRequest :: Request -> IO a
+retryWithRequest = throwIO . RetryException
+
 -- -----------------------------------------------------------------------------
 -- Application == Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 
 httpProxyApp :: Settings -> HC.Manager -> Application
-httpProxyApp settings mgr wreq respond = do
-    let req = proxyRequest wreq
-    mwreq <- proxyHttpRequestModifier settings req
-    let respond' wreq' = proxyHttpResponseModifier settings wreq' >=> respond
-    case mwreq of
-      Left resp -> respond' req resp
-      Right req' -> doUpstreamRequest settings mgr (respond' req') $ waiRequest wreq req'
+httpProxyApp settings mgr wreq respond = httpProxyApp' $ proxyRequest wreq
+  where
+    httpProxyApp' req = do
+      mwreq <- proxyHttpRequestModifier settings req
+      handle (\(RetryException req') -> httpProxyApp' req') $ case mwreq of
+        Left resp -> respond' req resp
+        Right req' -> doUpstreamRequest settings mgr (respond' req') $ waiRequest wreq req'
+
+    respond' req' = proxyHttpResponseModifier settings req' >=> respond
 
 
 doUpstreamRequest :: Settings -> HC.Manager -> (Wai.Response -> IO Wai.ResponseReceived) -> Wai.Request -> IO Wai.ResponseReceived
