@@ -137,6 +137,11 @@ requestTest = describe "Request:" $ do
             req <- addTestProxy testProxyPort <$> mkGetRequest Http "/whatever"
             result <- httpRun req
             "X-Test-Header: Blah" `BS.isInfixOf` resultBS result `shouldBe` True
+    it "Can add a response header." $
+        withTestProxy proxySettingsAddResponseHeader $ \ testProxyPort -> do
+            req <- addTestProxy testProxyPort <$> mkGetRequest Http "/whatever"
+            result <- httpRun req
+            ("X-Test-Header", "Blah") `elem` resultHeaders result `shouldBe` True
     it "Can rewrite HTTP to HTTPS." $
         withTestProxy proxySettingsHttpsUpgrade $ \ testProxyPort -> do
             req <- addTestProxy testProxyPort <$> mkGetRequest Http "/secure"
@@ -176,6 +181,11 @@ proxySettingsAddHeader = defaultProxySettings
     { proxyHttpRequestModifier = \ req -> return . Right $ req
                 { requestHeaders = (CI.mk "X-Test-Header", "Blah") : requestHeaders req
                 }
+    }
+
+proxySettingsAddResponseHeader :: Settings
+proxySettingsAddResponseHeader = defaultProxySettings
+    { proxyHttpResponseModifier = \ _ resp -> return $ Wai.mapResponseHeaders ((CI.mk "X-Test-Header", "Blah") :) resp
     }
 
 proxySettingsHttpsUpgrade :: Settings
