@@ -1,31 +1,44 @@
-sudo: required
-language: c
+---
+language: haskell
+cabal: "3.4"
 
 os: linux
 dist: xenial
 
-env:
- - GHCVER=8.0.2
- - GHCVER=8.2.2
- - GHCVER=8.4.4
- - GHCVER=8.6.4
+# Caching so the next build will be fast too.
+cache:
+ directories:
+  - $HOME/.cabal
+  - $HOME/.stack
+  - $TRAVIS_BUILD_DIR/.stack-work
+  - $TRAVIS_BUILD_DIR/dist-newstyle
 
 before_install:
- - sudo add-apt-repository -y ppa:hvr/ghc
- - sudo apt-get update
- - sudo apt-get install cabal-install-1.24 ghc-$GHCVER
- - export PATH=/opt/cabal/bin:/opt/ghc/$GHCVER/bin:$PATH
+ # Download and unpack the stack executable
+ - mkdir -p ~/.local/bin
+ - export PATH=$HOME/.local/bin:$PATH
+ - >
+   travis_retry curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz
+   | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
+ # Configure stack to use the system GHC installation
+ - stack config set system-ghc --global true
 
 install:
- - cabal-1.24 update
- - cabal-1.24 install --only-dependencies --enable-tests
+ - cabal install --only-dependencies --overwrite-policy=always
 
-script:
- - cabal-1.24 configure --enable-tests
- - cabal-1.24 build
- - dist/build/test/test
- - dist/build/test-io/test-io
- - cabal-1.24 haddock
- - cabal-1.24 sdist
+after_script:
+ - cabal haddock
+ - cabal sdist
+ - stack --no-terminal test
 
-
+jobs:
+ include:
+  - ghc: "8.0"
+    env: STACK_YAML=stack-8.0.yaml
+  - ghc: "8.2"
+    env: STACK_YAML=stack-8.2.yaml
+  - ghc: "8.4"
+    env: STACK_YAML=stack-8.4.yaml
+  - ghc: "8.6"
+    env: STACK_YAML=stack-8.6.yaml
+  - ghc: "8.8"
