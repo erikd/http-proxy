@@ -41,7 +41,7 @@ module Network.HTTP.Proxy
     )
     where
 
-import Blaze.ByteString.Builder (fromByteString)
+import Data.ByteString.Builder (byteString)
 import Control.Concurrent.Async (race_)
 import Control.Exception -- (SomeException, catch, toException)
 import Data.ByteString.Char8 (ByteString)
@@ -197,7 +197,7 @@ doUpstreamRequest settings mgr respond mwreq
                 }
         handle (respond . errorResponse) $
             HC.withResponse hreq mgr $ \res -> do
-                let body = mapOutput (Chunk . fromByteString) . HCC.bodyReaderSource $ HC.responseBody res
+                let body = mapOutput (Chunk . byteString) . HCC.bodyReaderSource $ HC.responseBody res
                     headers = (CI.mk "X-Via-Proxy", "yes") : filter dropResponseHeader (HC.responseHeaders res)
                 respond $ responseSource (HC.responseStatus res) headers body
       where
