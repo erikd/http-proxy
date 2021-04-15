@@ -5,10 +5,10 @@ os: linux
 dist: xenial
 
 env:
- - GHCVER=8.0.2
  - GHCVER=8.2.2
  - GHCVER=8.4.4
- - GHCVER=8.6.4
+ - GHCVER=8.6.5
+ - GHCVER=8.10.4
 
 before_install:
  - sudo add-apt-repository -y ppa:hvr/ghc
