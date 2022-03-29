@@ -137,6 +137,16 @@ requestTest = describe "Request:" $ do
             req <- addTestProxy testProxyPort <$> mkGetRequest Http "/whatever"
             result <- httpRun req
             "X-Test-Header: Blah" `BS.isInfixOf` resultBS result `shouldBe` True
+    it "Can add a response header." $
+        withTestProxy proxySettingsAddResponseHeader $ \ testProxyPort -> do
+            req <- addTestProxy testProxyPort <$> mkGetRequest Http "/whatever"
+            result <- httpRun req
+            ("X-Test-Header", "Blah") `elem` resultHeaders result `shouldBe` True
+    it "Can retry a request." $
+        withTestProxy proxySettingsRetry $ \ testProxyPort -> do
+            req <- addTestProxy testProxyPort <$> mkGetRequest Http "/whatever"
+            result <- httpRun req
+            resultBS result `shouldBe` "This is another page"
     it "Can rewrite HTTP to HTTPS." $
         withTestProxy proxySettingsHttpsUpgrade $ \ testProxyPort -> do
             req <- addTestProxy testProxyPort <$> mkGetRequest Http "/secure"
@@ -177,6 +187,21 @@ proxySettingsAddHeader = defaultProxySettings
                 { requestHeaders = (CI.mk "X-Test-Header", "Blah") : requestHeaders req
                 }
     }
+
+proxySettingsAddResponseHeader :: Settings
+proxySettingsAddResponseHeader = defaultProxySettings
+    { proxyHttpResponseModifier = \ _ resp -> return $ Wai.mapResponseHeaders ((CI.mk "X-Test-Header", "Blah") :) resp
+    }
+
+proxySettingsRetry :: Settings
+proxySettingsRetry = defaultProxySettings
+    { proxyHttpResponseModifier = \ req _ ->
+      if BS.isSuffixOf "/another" $ requestPath req
+      then return $ simpleResponse HT.status200 "This is another page"
+      else retryWithRequest $ req { requestPath = redirect $ requestPath req }
+    }
+  where
+    redirect path = fst (BS.spanEnd (/= '/') path) `BS.append` "another"
 
 proxySettingsHttpsUpgrade :: Settings
 proxySettingsHttpsUpgrade = defaultProxySettings

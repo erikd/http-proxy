@@ -38,12 +38,14 @@ module Network.HTTP.Proxy
     , runProxySettings
     , runProxySettingsSocket
     , defaultProxySettings
+    , retryWithRequest
     )
     where
 
 import Data.ByteString.Builder (byteString)
 import Control.Concurrent.Async (race_)
 import Control.Exception -- (SomeException, catch, toException)
+import Control.Monad ((>=>))
 import Data.ByteString.Char8 (ByteString)
 import Data.Conduit (ConduitT, Flush (..), (.|), mapOutput, runConduit, yield)
 import Data.Conduit.Network
@@ -119,6 +121,9 @@ data Settings = Settings
     -- ^ A function that allows the request to be modified before being run. Default: 'return . Right'.
     -- This only works for unencrypted HTTP requests (eg to upgrade the request to HTTPS) because
     -- HTTPS requests are encrypted.
+    , proxyHttpResponseModifier :: Request -> Response -> IO Response
+    -- ^ A function that allows the response to be modified before being sent
+    -- back to the client. Default: 'const return'.
     , proxyLogger :: ByteString -> IO ()
     -- ^ A function for logging proxy internal state. Default: 'return ()'.
     , proxyUpstream :: Maybe UpstreamProxy
@@ -155,6 +160,7 @@ defaultProxySettings = Settings
     , proxyOnException = defaultExceptionResponse
     , proxyTimeout = 30
     , proxyHttpRequestModifier = return . Right
+    , proxyHttpResponseModifier = const return
     , proxyLogger = const $ return ()
     , proxyUpstream = Nothing
     }
@@ -165,13 +171,28 @@ defaultExceptionResponse e =
         [ (HT.hContentType, "text/plain; charset=utf-8") ]
         $ LBS.fromChunks [BS.pack $ show e]
 
+data RetryException = RetryException Request
+                    deriving Show
+
+instance Exception RetryException
+
+-- | For use in 'proxyHttpResponseModifier'. Ignore the current response and perform a new request.
+retryWithRequest :: Request -> IO a
+retryWithRequest = throwIO . RetryException
+
 -- -----------------------------------------------------------------------------
 -- Application == Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 
 httpProxyApp :: Settings -> HC.Manager -> Application
-httpProxyApp settings mgr wreq respond = do
-    mwreq <- proxyHttpRequestModifier settings $ proxyRequest wreq
-    either respond (doUpstreamRequest settings mgr respond . waiRequest wreq) mwreq
+httpProxyApp settings mgr wreq respond = httpProxyApp' $ proxyRequest wreq
+  where
+    httpProxyApp' req = do
+      mwreq <- proxyHttpRequestModifier settings req
+      handle (\(RetryException req') -> httpProxyApp' req') $ case mwreq of
+        Left resp -> respond' req resp
+        Right req' -> doUpstreamRequest settings mgr (respond' req') $ waiRequest wreq req'
+
+    respond' req' = proxyHttpResponseModifier settings req' >=> respond
 
 
 doUpstreamRequest :: Settings -> HC.Manager -> (Wai.Response -> IO Wai.ResponseReceived) -> Wai.Request -> IO Wai.ResponseReceived
