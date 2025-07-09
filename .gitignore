@@ -1,10 +1,1 @@
-*.o
-*.hi
-.cabal-sandbox
-cabal.sandbox.config
-connect-test
-dist
-simple-proxy
-testsuite
-request-rewrite-proxy
-spellTmp.bak
+dist-newstyle/
