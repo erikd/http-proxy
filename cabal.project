@@ -1,2 +1,35 @@
 packages:
   ./
+
+tests: True
+test-show-details: direct
+
+if impl (ghc >= 9.14)
+  constraints:
+    , aeson >= 2.2
+
+-- cabal-allow-newer
+if impl (ghc >= 9.14)
+  allow-newer:
+    , aeson:bytestring
+    , aeson:containers
+    , aeson:indexed-traversable
+    , aeson:semialign
+    , aeson:template-haskell
+    , aeson:these
+    , aeson:time
+    , aeson:time-compat
+    , aeson:uuid-types
+    , binary:containers
+    , bytestring:base
+    , bytestring-lexing:base
+    , indexed-traversable:base
+    , indexed-traversable:containers
+    , indexed-traversable-instances:base
+    , parsec:bytestring
+    , semialign:base
+    , semialign:containers
+    , template-haskell:base
+    , these:base
+    , time-compat:base
+    , uuid-types:template-haskell
